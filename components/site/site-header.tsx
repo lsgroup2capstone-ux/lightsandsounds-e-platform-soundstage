@@ -1,0 +1,61 @@
+"use client"
+
+import Link from "next/link"
+import { useEffect, useState } from "react"
+import { UserRound } from "lucide-react"
+import { Logo } from "@/components/site/logo"
+import { Button } from "@/components/ui/button"
+import { isLoggedIn } from "@/lib/client-auth"
+
+const nav = [
+  { label: "Browse", href: "/browse" },
+  { label: "How it works", href: "/#how-it-works" },
+  { label: "For providers", href: "/#providers" },
+  { label: "Coverage", href: "/#coverage" },
+]
+
+export function SiteHeader() {
+  const [signedIn, setSignedIn] = useState(false)
+
+  useEffect(() => {
+    const refresh = () => setSignedIn(isLoggedIn())
+    refresh()
+    window.addEventListener("soundstage-account-updated", refresh)
+    return () => window.removeEventListener("soundstage-account-updated", refresh)
+  }, [])
+
+  return (
+    <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur-xl">
+      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-2 px-4 sm:gap-4 sm:px-6">
+        <Logo href={signedIn ? "/browse" : "/"} />
+        <nav className="hidden items-center gap-7 md:flex">
+          {nav.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+            >
+              {item.label}
+            </Link>
+          ))}
+        </nav>
+        <div className="flex items-center gap-2">
+          {signedIn ? (
+            <Button asChild size="sm" className="glow-primary">
+              <Link href="/dashboard"><UserRound width={16} height={16} /> Client profile</Link>
+            </Button>
+          ) : (
+            <>
+              <Button asChild variant="ghost" size="sm" className="h-11 text-muted-foreground hover:text-foreground sm:h-7">
+                <Link href="/login">Log in</Link>
+              </Button>
+              <Button asChild size="sm" className="glow-primary h-11 sm:h-7">
+                <Link href="/signup">Sign up</Link>
+              </Button>
+            </>
+          )}
+        </div>
+      </div>
+    </header>
+  )
+}

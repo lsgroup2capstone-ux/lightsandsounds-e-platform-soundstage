@@ -1,0 +1,20 @@
+"use client"
+
+import { useEffect, useState } from "react"
+import { getClientBookings, requestBookingRefund, reviewBookingRefund } from "@/lib/client-bookings"
+import { type Booking, formatPeso } from "@/lib/mock-data"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+
+export function RefundsPanel({ admin = false }: { admin?: boolean }) {
+  const [bookings, setBookings] = useState<Booking[]>([])
+  const [message, setMessage] = useState("")
+  useEffect(() => {
+    const refresh = () => setBookings(getClientBookings().filter(b => admin ? Boolean(b.refund) : b.status === "Cancelled" && b.cancelledBy === "provider" && b.paid && b.downpayment > 0))
+    refresh()
+    window.addEventListener("soundstage-bookings-updated", refresh); window.addEventListener("storage", refresh)
+    return () => { window.removeEventListener("soundstage-bookings-updated", refresh); window.removeEventListener("storage", refresh) }
+  }, [admin])
+  return <div className="space-y-4"><p className="text-sm text-muted-foreground">{admin ? "Send the refund manually before marking it paid. Record the transfer reference, or give a reason for rejection." : "Request your paid downpayment back when the provider cancels your event."}</p>{message && <p role="status">{message}</p>}{!bookings.length && <Card><CardContent className="py-10 text-center text-muted-foreground">{admin ? "No refund requests yet." : "No provider-cancelled paid events eligible for a refund."}</CardContent></Card>}{bookings.map(b => <Card key={b.id} id={`transaction-RF-${b.id}`} className="scroll-mt-24"><CardHeader><CardTitle>{b.packageName}</CardTitle><p className="text-sm text-muted-foreground">{b.id} / {b.provider} / {b.client} / {b.date}</p></CardHeader><CardContent className="space-y-4"><p className="font-semibold">Refund amount: {formatPeso(b.refund?.amount ?? b.downpayment)}</p>{b.refund ? <div className="space-y-2 text-sm"><p>Status: {b.refund.status}</p><p>Payout: {b.refund.method} / {b.refund.account}</p><p>Requested: {new Date(b.refund.requestedAt).toLocaleString()}</p>{b.refund.processedAt && <p>Processed: {new Date(b.refund.processedAt).toLocaleString()}</p>}{b.refund.reference && <p className="break-all">Transfer reference: {b.refund.reference}</p>}{b.refund.reason && <p>Rejection reason: {b.refund.reason}</p>}</div> : <form className="space-y-3" onSubmit={async event => { event.preventDefault(); const data = new FormData(event.currentTarget); try { await requestBookingRefund(b.id, String(data.get("method")), String(data.get("account"))); setMessage("Refund request sent to the administrator.") } catch (e) { setMessage((e as Error).message) } }}><label className="grid gap-2 text-sm">Refund method<select name="method" className="rounded-md border bg-background p-2"><option>GCash</option><option>Maya</option><option>Bank transfer</option></select></label><label className="grid gap-2 text-sm">Account name and number<Input name="account" required minLength={6} maxLength={200} /></label><Button type="submit">Request refund</Button></form>}{admin && b.refund?.status === "Pending" && <form className="space-y-3" onSubmit={async event => { event.preventDefault(); const data = new FormData(event.currentTarget); try { await reviewBookingRefund(b.id, String(data.get("status")) as "Paid" | "Rejected", String(data.get("details"))); setMessage("Refund decision saved and recorded in the audit log.") } catch (e) { setMessage((e as Error).message) } }}><label className="grid gap-2 text-sm">Decision<select name="status" className="rounded-md border bg-background p-2"><option value="Paid">Mark manually paid</option><option value="Rejected">Reject request</option></select></label><label className="grid gap-2 text-sm">Payout reference or rejection reason<Input name="details" required minLength={3} maxLength={200} /></label><Button type="submit">Save refund decision</Button></form>}</CardContent></Card>)}</div>
+}
