@@ -8,4 +8,8 @@ accepted decision without the user's approval.
 
 | # | Decision | Status |
 | --- | --- | --- |
-| <!-- 0001 --> | <!-- Customer reviews are never edited by staff --> | <!-- accepted --> |
+| [0001](0001-clerk-auth-profiles-roles.md) | Clerk authenticates every role; `profiles` owns roles | proposed |
+| [0002](0002-bookings-relational-source.md) | Bookings live in relational tables; confirmed only after verified payment | proposed |
+| [0003](0003-payments-webhook-only.md) | Payments become paid only through a verified, deduplicated webhook | proposed |
+| [0004](0004-financial-records-and-audit.md) | Financial records never deleted; payroll master decides money; append-only audit | proposed |
+| [0005](0005-build-order.md) | Twelve-step build order; role specs split into matching plans | proposed |
