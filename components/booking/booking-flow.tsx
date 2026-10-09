@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, type ReactElement } from "react"
+import { useEffect, useState, type ReactElement } from "react"
 import { useRouter } from "next/navigation"
 import { CalendarDays, Check, ChevronDown, CreditCard, MapPin, Users } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -15,9 +15,13 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { type Booking, type ServicePackage, formatPeso } from "@/lib/mock-data"
-import { getAllBookings, saveClientBooking } from "@/lib/client-bookings"
+import { saveClientBooking } from "@/lib/client-bookings"
+import { openPaymentWindow } from "@/lib/payment-window"
+import { mutate } from "@/lib/app-store"
+import { BookingDatePicker } from "@/components/booking/booking-date-picker"
 import { cn } from "@/lib/utils"
 import { getAccount } from "@/lib/client-auth"
+import { PaymentMethodPicker } from "@/components/payment/payment-method-picker"
 import { PaymentReceiptCard } from "@/components/payment/payment-receipt"
 
 import { isAreaCovered, getTownDistance, getTransportationTier, getTransportationFee } from "@/lib/booking-pricing"
@@ -35,6 +39,8 @@ export function BookingFlow({ pkg, trigger }: { pkg: ServicePackage; trigger: Re
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [step, setStep] = useState<Step>(1)
+  const [blockedDates, setBlockedDates] = useState<string[]>([])
+  const [availabilityReady, setAvailabilityReady] = useState(false)
   const [date, setDate] = useState("")
   const [time, setTime] = useState("")
   const [eventType, setEventType] = useState("")
@@ -44,10 +50,11 @@ export function BookingFlow({ pkg, trigger }: { pkg: ServicePackage; trigger: Re
   const [notes, setNotes] = useState("")
   const [durationDays, setDurationDays] = useState(1)
   const [bookingError, setBookingError] = useState("")
+  const [checkoutUrl, setCheckoutUrl] = useState("")
   const [saving, setSaving] = useState(false)
   const [completedBooking, setCompletedBooking] = useState<Booking | null>(null)
   const [reference, setReference] = useState("")
-  const [paymentMethod, setPaymentMethod] = useState("GCash")
+  const [paymentMethod, setPaymentMethod] = useState("GCash QR")
 
   const servicePrice = Math.round(pkg.price * (1 + 0.38 * (durationDays - 1)))
   const extensionCharge = servicePrice - pkg.price
@@ -58,10 +65,29 @@ export function BookingFlow({ pkg, trigger }: { pkg: ServicePackage; trigger: Re
   const totalPrice = servicePrice + transportationFee
   const downpayment = Math.round(totalPrice * 0.3)
   const balance = totalPrice - downpayment
-  const canProceed = date && time.trim() && eventType.trim() && eventTown && venue && guests
+  const canProceed = availabilityReady && !findBookingConflict() && date && time.trim() && eventType.trim() && eventTown && venue && guests
+
+  useEffect(() => {
+    if (!open) return
+    let active = true
+    setAvailabilityReady(false)
+    const refresh = async () => {
+      try {
+        const dates = await mutate<string[]>("getBookingAvailability", [pkg.id])
+        if (active) { setBlockedDates(dates); setAvailabilityReady(true) }
+      } catch (error) {
+        if (active) { setAvailabilityReady(false); setBookingError(error instanceof Error ? error.message : "Could not load available dates.") }
+      }
+    }
+    void refresh()
+    const timer = window.setInterval(refresh, 30000)
+    window.addEventListener("focus", refresh)
+    return () => { active = false; window.clearInterval(timer); window.removeEventListener("focus", refresh) }
+  }, [open, pkg.id])
 
   function reset() {
     setStep(1)
+    setCheckoutUrl("")
     setDate("")
     setTime("")
     setEventType("")
@@ -73,7 +99,7 @@ export function BookingFlow({ pkg, trigger }: { pkg: ServicePackage; trigger: Re
     setBookingError("")
     setCompletedBooking(null)
     setReference("")
-    setPaymentMethod("GCash")
+    setPaymentMethod("GCash QR")
   }
 
   function handleOpenChange(next: boolean) {
@@ -82,7 +108,7 @@ export function BookingFlow({ pkg, trigger }: { pkg: ServicePackage; trigger: Re
   }
 
   async function completePayment() {
-    if (saving) return
+    if (saving || !availabilityReady || checkoutUrl) return
     const conflict = findBookingConflict()
     if (conflict) { setBookingError(`The selected date is already booked through ${formatEndDate(conflict.date, conflict.durationDays || 1)}.`); setStep(1); return }
     const bookingReference = `BK-${Date.now().toString().slice(-6)}`
@@ -113,25 +139,27 @@ export function BookingFlow({ pkg, trigger }: { pkg: ServicePackage; trigger: Re
       paidAt: new Date().toISOString(),
       paymentMethod,
     }
+    let paymentTab: Window | undefined
     setSaving(true)
     try {
+      paymentTab = openPaymentWindow()
       const saved = await saveClientBooking(booking)
-      setCompletedBooking(saved)
-      setReference(saved.id)
-      setStep(4)
-    } catch (error) { setBookingError((error as Error).message); setStep(1) }
+      setCheckoutUrl(saved.checkoutUrl)
+      if (!paymentTab.closed) paymentTab.location.replace(saved.checkoutUrl)
+    } catch (error) { paymentTab?.close(); setBookingError((error as Error).message); setStep(1) }
     finally { setSaving(false) }
   }
 
   function findBookingConflict(startDate = date, days = durationDays) {
     if (!startDate) return undefined
     const requestedDates = eventDates(startDate, days)
-    return getAllBookings().find((booking) => booking.provider === pkg.provider.name && booking.status !== "Cancelled" && eventDates(booking.date, booking.durationDays || 1).some((bookedDate) => requestedDates.includes(bookedDate)))
+    const blocked = requestedDates.find(day => blockedDates.includes(day))
+    return blocked ? { date: blocked, durationDays: 1 } : undefined
   }
 
   function selectDate(nextDate: string) {
-    setDate(nextDate)
     const conflict = findBookingConflict(nextDate)
+    if (!conflict) setDate(nextDate)
     setBookingError(conflict ? "This date is already booked for this provider. Choose another date." : "")
   }
 
@@ -142,6 +170,7 @@ export function BookingFlow({ pkg, trigger }: { pkg: ServicePackage; trigger: Re
   }
 
   function continueToReview() {
+    if (!availabilityReady) return
     const conflict = findBookingConflict()
     if (conflict) return setBookingError(`This provider is already booked on the selected date. Choose another date.`)
     setBookingError("")
@@ -190,8 +219,8 @@ export function BookingFlow({ pkg, trigger }: { pkg: ServicePackage; trigger: Re
           <div className="flex flex-col gap-4">
             <div className="grid grid-cols-2 gap-3">
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="bk-date">Event date</Label>
-                <Input id="bk-date" type="date" min={today()} value={date} onChange={(e) => selectDate(e.target.value)} aria-describedby="bk-date-help" />
+                <span className="text-sm font-medium">Event date</span>
+                <BookingDatePicker value={date} onChange={selectDate} min={today()} disabled={!availabilityReady} isUnavailable={day => Boolean(findBookingConflict(day))} />
               </div>
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="bk-time">Start time</Label>
@@ -211,7 +240,7 @@ export function BookingFlow({ pkg, trigger }: { pkg: ServicePackage; trigger: Re
               <ChevronDown aria-hidden="true" className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-foreground" />
               </div>
               <p className="text-xs text-muted-foreground">Each additional day costs 38% of the base service price.</p>
-              <p id="bk-date-help" className="text-xs text-muted-foreground">Dates already booked with this provider are unavailable to other clients.</p>
+              <p id="bk-date-help" className="text-xs text-muted-foreground">Dates are blocked only after the provider accepts a booking. Pending requests do not reserve dates.</p>
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="bk-town">Event town / city</Label>
@@ -293,7 +322,7 @@ export function BookingFlow({ pkg, trigger }: { pkg: ServicePackage; trigger: Re
                 Back
               </Button>
               <Button className="flex-1" onClick={() => setStep(3)}>
-                Continue to demo checkout
+                Continue to PayMongo
               </Button>
             </div>
           </div>
@@ -306,22 +335,17 @@ export function BookingFlow({ pkg, trigger }: { pkg: ServicePackage; trigger: Re
               <p className="text-sm text-muted-foreground">Downpayment due now</p>
               <p className="font-display text-3xl font-bold text-foreground">{formatPeso(downpayment)}</p>
               <p className="mt-1 text-xs text-muted-foreground">
-                Secure your date. Balance of {formatPeso(balance)} is paid on the event day.
+                Your date is reserved after provider acceptance. Balance of {formatPeso(balance)} is paid on the event day.
               </p>
             </div>
-            <div className="flex flex-col gap-2">
-              <Label>Payment method</Label>
-              <div className="flex flex-col gap-2">
-                <PayOption label="GCash" desc="Demo e-wallet option" checked={paymentMethod === "GCash"} onChange={setPaymentMethod} />
-                <PayOption label="Credit / Debit card" desc="Demo card option" checked={paymentMethod === "Credit / Debit card"} onChange={setPaymentMethod} />
-                <PayOption label="Maya" desc="Demo e-wallet option" checked={paymentMethod === "Maya"} onChange={setPaymentMethod} />
-              </div>
-            </div>
+            <PaymentMethodPicker value={paymentMethod} onChange={setPaymentMethod} disabled={saving} />
+            <p className="text-xs text-muted-foreground">PayMongo opens in a new tab. Complete your payment there.</p>
+            {checkoutUrl && <p role="status" className="text-sm">Checkout is ready. <a href={checkoutUrl} target="_blank" rel="noopener noreferrer" className="text-primary underline">Open payment tab</a></p>}
             <div className="flex gap-2">
               <Button variant="outline" className="flex-1 border-border" onClick={() => setStep(2)}>
                 Back
               </Button>
-              <Button className="flex-1" disabled={saving} onClick={completePayment}>
+              <Button className="flex-1" disabled={saving || Boolean(checkoutUrl)} onClick={completePayment}>
                 <CreditCard width={16} height={16} />
                 Pay {formatPeso(downpayment)}
               </Button>
@@ -380,18 +404,6 @@ function Row({ icon, label }: { icon: React.ReactNode; label: string }) {
       <span className="text-primary">{icon}</span>
       <span className="text-foreground">{label}</span>
     </span>
-  )
-}
-
-function PayOption({ label, desc, checked, onChange }: { label: string; desc: string; checked: boolean; onChange: (method: string) => void }) {
-  return (
-    <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-border bg-card p-3 transition-colors has-[:checked]:border-primary has-[:checked]:bg-primary/10">
-      <input type="radio" name="pay" checked={checked} onChange={() => onChange(label)} className="h-4 w-4 accent-[var(--primary)]" />
-      <span className="flex flex-col">
-        <span className="text-sm font-medium text-foreground">{label}</span>
-        <span className="text-xs text-muted-foreground">{desc}</span>
-      </span>
-    </label>
   )
 }
 

@@ -34,7 +34,7 @@ test('full server workflows persist in PostgreSQL and roll back conflicting writ
     return query
   }
   const sql = { begin: callback => db.transaction(tx => callback(tag(tx))) }
-  const load = require('./ts-loader.cjs')({ [path.resolve('lib/server/database.ts')]: { getDatabase: () => sql } })
+  const load = require('./ts-loader.cjs')({ [path.resolve('lib/server/paymongo.ts')]: require('./paymongo-fixture.cjs')(), [path.resolve('lib/server/database.ts')]: { getDatabase: () => sql } })
   const { execute } = load('lib/server/data-service.ts')
   const user = (n, role) => ({ id: '00000000-0000-0000-0000-' + String(n).padStart(12, '0'), email: role + '@test.com', email_confirmed_at: new Date().toISOString(), user_metadata: { firstName: role, lastName: 'Test', role, business: 'Events' }, app_metadata: role === 'admin' ? { role: 'admin' } : {} })
   const admin = user(1, 'admin'), provider = user(2, 'provider'), client = user(3, 'client'), outsider = user(4, 'outsider')
@@ -63,16 +63,27 @@ test('full server workflows persist in PostgreSQL and roll back conflicting writ
     process.env.ENABLE_DEMO_PAYMENTS = 'true'
     const bookingInput = { packageId: 'service-1', date: '2027-01-02', time: '12:00', eventTown: 'Balayan', location: 'Venue', guests: 10, paymentMethod: 'GCash', total: 1 }
     const concurrent = await Promise.allSettled([execute(client, 'saveClientBooking', [bookingInput]), execute(outsider, 'saveClientBooking', [bookingInput])])
-    assert.equal(concurrent.filter(r => r.status === 'fulfilled').length, 1)
-    assert.equal(concurrent.filter(r => r.status === 'rejected').length, 1)
+    assert.equal(concurrent.filter(r => r.status === 'fulfilled').length, 2)
+    assert.equal(concurrent.filter(r => r.status === 'rejected').length, 0)
     const winner = concurrent.find(r => r.status === 'fulfilled').value.result
-    assert.equal(winner.total, 1000)
+    assert.ok(winner.checkoutUrl.startsWith('https://checkout.paymongo.com/'))
+    await execute(client, 'verifyPayment', [winner.id])
     const saved = await execute(client)
     assert.equal(JSON.parse(saved.records['soundstage-client-bookings-v3:client%40test.com']).length, 1)
     const unrelated = await execute(outsider)
     assert.equal(unrelated.records['soundstage-client-bookings-v3:client%40test.com'], undefined)
     await assert.rejects(execute(outsider, 'updateClientBookingStatus', [winner.id, 'Cancelled']), /not found/)
-    await execute(provider, 'updateClientBookingStatus', [winner.id, 'Confirmed'])
+    const otherBooking = concurrent[1].value.result
+    await execute(outsider, 'verifyPayment', [otherBooking.id])
+    assert.deepEqual((await execute(client, 'getBookingAvailability', ['service-1'])).result, [])
+    const accepted = await Promise.allSettled([
+      execute(provider, 'updateClientBookingStatus', [winner.id, 'Confirmed']),
+      execute(provider, 'updateClientBookingStatus', [otherBooking.id, 'Confirmed']),
+    ])
+    assert.equal(accepted[0].status, 'fulfilled')
+    assert.equal(accepted[1].status, 'rejected')
+    assert.match(accepted[1].reason.message, /already accepted/)
+    assert.deepEqual((await execute(client, 'getBookingAvailability', ['service-1'])).result, ['2027-01-02'])
     await execute(provider, 'updateClientBookingStatus', [winner.id, 'Completed'])
     await execute(client, 'submitEventFeedback', [winner.id, 5, 'Excellent'])
     const finalState = await execute(admin)

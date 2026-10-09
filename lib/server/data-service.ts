@@ -1,3 +1,4 @@
+import { createCheckout, paymongo, paymentKey } from "./paymongo"
 import { createClient } from "@supabase/supabase-js"
 import type { AppIdentity } from "./clerk-auth"
 import { getDatabase } from "./database"
@@ -13,6 +14,7 @@ import type { ClientAccount } from "../client-auth"
 import type { Booking } from "../mock-data"
 import { isAreaCovered, getTownDistance, getTransportationFee } from "../booking-pricing"
 import { importLegacyRecords } from "./legacy-import"
+import { createBackup, previewBackup, restoreBackup } from "./backup"
 
 export class RequestError extends Error { constructor(message: string, public status = 400) { super(message) } }
 const accountsKey = "soundstage-accounts-v2"
@@ -82,13 +84,85 @@ function updateProfile(value: unknown, role: "client" | "provider") {
   return result
 }
 
+const paymentPrefix = "soundstage-paymongo:"
+type PaymentRecord = { id: string; email: string; amount: number; sessionId: string; checkoutUrl: string; kind: "booking" | "subscription"; plan?: string; paid?: boolean; cancelled?: boolean }
+const readPayment = (id: string): PaymentRecord | null => JSON.parse(storage.getItem(paymentPrefix + id) || "null")
+async function startPayment(email: string, id: string, name: string, amount: number, method: string, kind: PaymentRecord["kind"], plan?: string) {
+  const existing = Object.entries(storage.values).filter(([key]) => key.startsWith(paymentPrefix)).map(([, raw]) => JSON.parse(raw) as PaymentRecord).find(p => p.email === email.toLowerCase() && p.kind === kind && !p.paid && !p.cancelled)
+  if (existing) throw new RequestError("You have an unfinished checkout. Open /payment/return?id=" + existing.id + " to resume it.")
+  const checkout = await createCheckout(id, name, amount, method)
+  const url = new URL(checkout.attributes.checkout_url)
+  if (url.protocol !== "https:" || url.hostname !== "checkout.paymongo.com") throw new RequestError("Invalid checkout URL.")
+  storage.setItem(paymentPrefix + id, JSON.stringify({ id, email: email.toLowerCase(), amount, sessionId: checkout.id, checkoutUrl: url.href, kind, plan } satisfies PaymentRecord))
+  return { id, checkoutUrl: url.href }
+}
+async function settlePayment(payment: PaymentRecord) {
+  if (payment.paid) return { paid: true, kind: payment.kind }
+  const checkout = await paymongo("/" + encodeURIComponent(payment.sessionId))
+  const attributes = checkout.attributes
+  if (attributes.reference_number !== payment.id || attributes.livemode !== paymentKey().startsWith("sk_live_")) throw new RequestError("Payment reference mismatch.")
+  const paid = attributes.payments?.find((p: any) => p.attributes?.status === "paid" && p.attributes.currency === "PHP" && p.attributes.amount === Math.round(payment.amount * 100))
+  if (!paid) {
+    if (attributes.status === "expired") {
+      payment.cancelled = true
+      storage.setItem(paymentPrefix + payment.id, JSON.stringify(payment))
+      if (payment.kind === "booking") {
+        const key = keyFor(bookingPrefix, payment.email)
+        const items: Booking[] = JSON.parse(storage.getItem(key) || "[]")
+        storage.setItem(key, JSON.stringify(items.map(b => b.id === payment.id ? { ...b, status: "Cancelled", cancelledBy: "client" } : b)))
+      }
+      return { paid: false, cancelled: true, kind: payment.kind }
+    }
+    return { paid: false, kind: payment.kind, checkoutUrl: payment.checkoutUrl }
+  }
+  const at = new Date().toISOString()
+  const method = `${attributes.livemode ? "PayMongo" : "DEMO: PayMongo test"}: ${paid.attributes.source?.type || "payment"}`
+  if (payment.kind === "booking") {
+    const key = keyFor(bookingPrefix, payment.email)
+    const items: Booking[] = JSON.parse(storage.getItem(key) || "[]")
+    const booking = items.find(b => b.id === payment.id)
+    if (!booking) throw new RequestError("Booking not found.")
+    booking.paid = true; booking.paidAt = at; booking.paymentMethod = method
+    storage.setItem(key, JSON.stringify(items))
+  } else {
+    const state = JSON.parse(storage.getItem(billingKey) || '{"subscriptions":[],"payments":[],"audit":[]}')
+    const subscription = state.subscriptions.find((s: billing.Subscription) => s.email === payment.email)
+    if (!subscription) throw new RequestError("Subscription not found.")
+    subscription.plan = payment.plan
+    subscription.paidUntil = new Date(Math.max(Date.now(), Date.parse(subscription.paidUntil || subscription.trialEnd)) + 30 * 86400000).toISOString()
+    state.payments.unshift({ id: payment.id, email: payment.email, customer: payment.email, plan: payment.plan, amount: payment.amount, method, reference: paid.id, status: "Paid", createdAt: at, paidAt: at, invoice: `SI-${payment.id}` })
+    storage.setItem(billingKey, JSON.stringify(state))
+  }
+  payment.paid = true
+  storage.setItem(paymentPrefix + payment.id, JSON.stringify(payment))
+  return { paid: true, kind: payment.kind }
+}
+
 // This allowlist is the only browser-accessible write surface. Domain helpers are not RPCs.
 export const actions: Record<string, (...args: any[]) => unknown> = {
+  createBackup,
+  previewBackup,
+  restoreBackup,
   importLegacyRecords,
   setNotificationReads: ids => {
     const actor = requireRole("client", "provider", "admin")
     if (!Array.isArray(ids) || ids.length > 10000 || ids.some(id => typeof id !== "string")) throw new RequestError("Invalid notifications.")
     storage.setItem(`soundstage-event-notifications:${actor.role}:${actor.email.toLowerCase()}`, JSON.stringify(ids))
+  },
+  getBookingAvailability: packageId => {
+    const serviceId = text(packageId, 100)
+    const owner = Object.entries(storage.values).find(([key, raw]) => key.startsWith(servicePrefix) && JSON.parse(raw).some((s: { id: string; active: boolean }) => s.id === serviceId && s.active))
+    if (!owner) throw new RequestError("Service is no longer available.", 404)
+    const ids = new Set((JSON.parse(owner[1]) as { id: string }[]).map(s => s.id))
+    const dates = new Set<string>(JSON.parse(storage.getItem("soundstage-schedule:" + owner[0].slice(servicePrefix.length)) || "[]"))
+    for (const booking of bookings.getAllBookings()) {
+      if (!ids.has(booking.packageId) || !(["Confirmed", "Completed"].includes(booking.status))) continue
+      for (let day = 0; day < (booking.durationDays || 1); day++) {
+        const time = Date.parse(booking.date + "T00:00:00Z") + day * 86400000
+        if (Number.isFinite(time)) dates.add(new Date(time).toISOString().slice(0, 10))
+      }
+    }
+    return [...dates].sort()
   },
   toggleScheduleDate: date => {
     const actor = requireRole("provider")
@@ -116,7 +190,7 @@ export const actions: Record<string, (...args: any[]) => unknown> = {
     for (const old of services.getProviderServices("current")) if (!retained.has(old.id) && bookings.getAllBookings().some(b => b.packageId === old.id)) throw new RequestError("Deactivate services with existing bookings instead of deleting them.")
     return services.updateProviderServices(next)
   },
-  saveClientBooking: value => {
+  saveClientBooking: async value => {
     const actor = requireRole("client")
     const v = record(value)
     const service = services.getProviderServices().find(s => s.id === v.packageId && s.active)
@@ -130,24 +204,58 @@ export const actions: Record<string, (...args: any[]) => unknown> = {
     const providerIds = new Set((JSON.parse(storage.getItem(owner)!) as { id: string }[]).map(s => s.id))
     const blocked: string[] = JSON.parse(storage.getItem("soundstage-schedule:" + owner.slice(servicePrefix.length)) || "[]")
     if (blocked.some(d => Date.parse(d + "T00:00:00Z") >= start && Date.parse(d + "T00:00:00Z") < start + duration * 86400000)) throw new RequestError("This provider has blocked a selected date.")
-    if (bookings.getAllBookings().some(b => providerIds.has(b.packageId) && b.status !== "Cancelled" && start < Date.parse(b.date + "T00:00:00Z") + (b.durationDays || 1) * 86400000 && start + duration * 86400000 > Date.parse(b.date + "T00:00:00Z"))) throw new RequestError("This provider is already booked for those dates.")
+    if (bookings.getAllBookings().some(b => providerIds.has(b.packageId) && ["Confirmed", "Completed"].includes(b.status) && start < Date.parse(b.date + "T00:00:00Z") + (b.durationDays || 1) * 86400000 && start + duration * 86400000 > Date.parse(b.date + "T00:00:00Z"))) throw new RequestError("This provider is already booked for those dates.")
     const base = Math.round(service.price * (1 + .38 * (duration - 1)))
     const eventTown = text(v.eventTown, 200)
     const outside = !isAreaCovered(eventTown, service.coverageAreas || service.location)
     const townsAway = outside ? getTownDistance(service.coverageAreas || service.location, eventTown) : 0
     const transportationFee = outside ? getTransportationFee(eventTown, townsAway) : 0
     const total = base + transportationFee
-    const demo = process.env.ENABLE_DEMO_PAYMENTS === "true"
-    if (!demo) throw new RequestError("Checkout is not enabled. Configure a payment integration, or enable demo payments for testing.")
-    const saved: Booking = { id: crypto.randomUUID(), packageId: service.id, packageName: service.name, provider: service.providerName, client: fullName(actor), image: service.image, date, time: text(v.time, 64), ...(v.eventType !== undefined ? { eventType: text(v.eventType, 100) } : {}), location: text(v.location, 500), guests: finite(v.guests, 1, 100000), notes: String(v.notes || "").slice(0, 5000), durationDays: duration, basePrice: service.price, transportationFee, eventTown, townsAway, total, downpayment: Math.round(total * .3), status: "Pending", paid: true, paidAt: new Date().toISOString(), paymentMethod: `DEMO: ${text(v.paymentMethod, 50)}` }
+    paymentKey()
+    const saved: Booking = { id: crypto.randomUUID(), packageId: service.id, packageName: service.name, provider: service.providerName, client: fullName(actor), image: service.image, date, time: text(v.time, 64), ...(v.eventType !== undefined ? { eventType: text(v.eventType, 100) } : {}), location: text(v.location, 500), guests: finite(v.guests, 1, 100000), notes: String(v.notes || "").slice(0, 5000), durationDays: duration, basePrice: service.price, transportationFee, eventTown, townsAway, total, downpayment: Math.round(total * .3), status: "Pending", paid: false, paymentMethod: `PayMongo: ${text(v.paymentMethod, 50)}` }
+    const checkout = await startPayment(actor.email, saved.id, saved.packageName + " deposit", saved.downpayment, text(v.paymentMethod, 50), "booking")
     bookings.saveClientBooking(saved)
-    return saved
+    return checkout
   },
-  updateClientBookingStatus: (id, status) => { ownBooking(id); if (!["Confirmed", "Cancelled", "Completed"].includes(status)) throw new RequestError("Invalid booking status."); return bookings.updateClientBookingStatus(id, status) },
+  updateClientBookingStatus: (id, status) => {
+    const booking = ownBooking(id)
+    if (status === "Confirmed") {
+      const actor = requireRole("provider")
+      const own = JSON.parse(storage.getItem(keyFor(servicePrefix, actor.email)) || "[]") as { id: string }[]
+      const ids = new Set(own.map(s => s.id))
+      if (!ids.has(booking.packageId)) throw new RequestError("Booking not found.", 404)
+      const start = Date.parse(booking.date + "T00:00:00Z")
+      const end = start + (booking.durationDays || 1) * 86400000
+      const blocked: string[] = JSON.parse(storage.getItem(keyFor("soundstage-schedule:", actor.email)) || "[]")
+      if (blocked.some(date => { const time = Date.parse(date + "T00:00:00Z"); return time >= start && time < end })) throw new RequestError("A selected date is blocked in your schedule.")
+      if (bookings.getAllBookings().some(b => b.id !== booking.id && ids.has(b.packageId) && ["Confirmed", "Completed"].includes(b.status) && start < Date.parse(b.date + "T00:00:00Z") + (b.durationDays || 1) * 86400000 && end > Date.parse(b.date + "T00:00:00Z"))) throw new RequestError("You already accepted a booking for these dates. Choose which booking to keep before accepting another.")
+    }
+ if (!booking.paid && booking.paymentMethod?.startsWith("PayMongo:")) throw new RequestError("Complete payment before changing this booking. Contact support to cancel an unpaid checkout."); if (!["Confirmed", "Cancelled", "Completed"].includes(status)) throw new RequestError("Invalid booking status."); return bookings.updateClientBookingStatus(id, status) },
   submitEventFeedback: (id, rating, comment) => { ownBooking(id, "client"); return bookings.submitEventFeedback(id, rating, text(comment, 2000)) },
   requestBookingRefund: (id, method, account) => { ownBooking(id, "client"); return bookings.requestBookingRefund(id, method, text(account, 200)) },
   reviewBookingRefund: (id, status, details) => { requireRole("admin"); return bookings.reviewBookingRefund(id, status, text(details, 200)) },
-  payDemoSubscription: (plan, method) => { requireRole("provider"); if (process.env.ENABLE_DEMO_PAYMENTS !== "true") throw new RequestError("Demo payments are disabled."); return billing.payDemoSubscription(plan, method) },
+  createSubscriptionCheckout: async (name, method) => {
+    const actor = requireRole("provider")
+    const plan = billing.plans.find(p => p.name === name)
+    if (!plan) throw new RequestError("Select a plan.")
+    billing.ensureProviderTrial(actor.email)
+    return startPayment(actor.email, crypto.randomUUID(), plan.name + " subscription", plan.amount, text(method, 50), "subscription", plan.name)
+  },
+  cancelPayment: async id => {
+    const actor = requireRole("client", "provider")
+    const payment = readPayment(text(id, 100))
+    if (!payment || payment.email !== actor.email.toLowerCase()) throw new RequestError("Payment not found.", 404)
+    const result = await settlePayment(payment)
+    if (result.paid || payment.cancelled) return result
+    await paymongo("/" + encodeURIComponent(payment.sessionId) + "/expire", undefined, "POST")
+    return settlePayment(payment)
+  },
+  verifyPayment: async id => {
+    const actor = requireRole("client", "provider")
+    const payment = readPayment(text(id, 100))
+    if (!payment || payment.email !== actor.email.toLowerCase()) throw new RequestError("Payment not found.", 404)
+    return settlePayment(payment)
+  },
   submitSubscriptionPayment: (plan, method, reference) => { requireRole("provider"); return billing.submitSubscriptionPayment(plan, method, text(reference, 100)) },
   reviewSubscriptionPayment: (id, status) => { requireRole("admin"); if (!["Paid", "Rejected"].includes(status)) throw new RequestError("Invalid payment status."); return billing.reviewSubscriptionPayment(id, status) },
   sendBookingMessage: value => {
@@ -216,7 +324,7 @@ export async function authenticate(request: Request, _options: { allowUnverified
   return user
 }
 
-export async function execute(user: AppIdentity | null, action?: string, args: unknown[] = [], signupRole?: string) {
+export async function execute(user: AppIdentity | null, action?: string, args: unknown[] = [], signupRole?: string, webhookSession?: string) {
   if (action && !user) throw new RequestError("Sign in to continue.", 401)
   if (action && !Object.hasOwn(actions, action)) throw new RequestError("Unknown operation.", 404)
   const sql = getDatabase()
@@ -264,7 +372,12 @@ export async function execute(user: AppIdentity | null, action?: string, args: u
         session.setItem("soundstage-session", JSON.stringify({ role: account.role, email: account.email }))
         if (account.role === "provider" && account.application?.status === "Approved") billing.ensureProviderTrial(account.email)
       }
-      const result = action ? await actions[action](...args) : null
+      let result = action ? await actions[action](...args) : null
+      if (webhookSession) {
+        const payment = Object.entries(storage.values).filter(([key]) => key.startsWith(paymentPrefix)).map(([, raw]) => JSON.parse(raw) as PaymentRecord).find(p => p.sessionId === webhookSession)
+        if (!payment) throw new RequestError("Payment record is not ready.", 503)
+        result = await settlePayment(payment)
+      }
       for (const [key, value] of Object.entries(storage.values)) {
         if (key === "soundstage-admin-account") continue
         if (originalValues.get(key) !== value) await tx`insert into soundstage.records (key,value) values (${key},${tx.json(JSON.parse(value))}) on conflict (key) do update set value=excluded.value, updated_at=now()`

@@ -31,7 +31,7 @@ export function getClientBookings(): Booking[] {
   return key ? readBookings(key) : getAllBookings()
 }
 
-export function saveClientBooking(booking: Booking) { return mutate<Booking>("saveClientBooking", [booking]) }
+export function saveClientBooking(booking: Booking) { return mutate<{ id: string; checkoutUrl: string }>("saveClientBooking", [booking]) }
 
 export function updateClientBookingStatus(id: string, status: Booking["status"]) { return mutate<Booking | null>("updateClientBookingStatus", [id, status]) }
 

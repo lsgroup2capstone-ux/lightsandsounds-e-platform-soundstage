@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180">
+  <rect width="180" height="180" rx="27" fill="#0874ce"/>
+  <g fill="none" stroke-linecap="round">
+    <path d="M102 44a31 31 0 1 0 0 51" stroke="#1036a5" stroke-width="8"/>
+    <path d="M99 53a20 20 0 1 0 5 24H86" stroke="#fff" stroke-width="7" stroke-linejoin="round"/>
+    <path d="M113 55a35 35 0 0 1 0 29" stroke="#42b9eb" stroke-width="8"/>
+    <path d="M126 49a48 48 0 0 1 0 42" stroke="#65c3e9" stroke-width="8"/>
+  </g>
+  <text x="90" y="147" fill="#fff" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-size="39" font-weight="600" letter-spacing="-1">GCash</text>
+</svg>
