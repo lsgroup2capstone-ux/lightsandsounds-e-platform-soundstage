@@ -2,7 +2,7 @@
 artifact: spec
 schema: 1
 feature: 20261009-role-based-access
-revision: 2
+revision: 3
 status: spec-approved
 risk: high-risk
 ---
@@ -10,7 +10,7 @@ risk: high-risk
 # Shared authentication and role-based access
 
 - Feature id: 20261009-role-based-access
-- Revision: 2
+- Revision: 3
 - Status: spec-approved
 - Risk lane: high-risk
 - Approved by: user, 2026-10-09
@@ -30,6 +30,7 @@ Facts found in the code:
 - `app/client/page.tsx` and `app/dashboard/page.tsx` both render `ClientDashboard`. `app/provider/[[...slug]]` and `app/admin/[[...slug]]` render `HubWorkspace`. No `app/payroll-master` exists.
 - `lib/client-auth.ts` keeps a storage-backed account session used by existing UI; `/api/*` routes authenticate with bearer tokens.
 - `app/api/auth/admin-login/route.ts` already returns 410; admins currently sign in through Supabase Auth.
+- `scripts/migrate-clerk-to-supabase.cjs` previously moved Clerk clients and providers into Supabase Auth, and `lib/client-auth.ts:63-70` still falls back to a Supabase sign-in, so `identities` may hold Supabase-only clients and providers as well as admins.
 - `database/schema.sql:2` states the migration never drops existing tables.
 
 ## Decisions
@@ -48,7 +49,7 @@ Facts found in the code:
 | D10 | Clerk keys missing | Fail closed: protected routes show a "sign-in unavailable" error; public pages still work. | Today a missing key silently removes protection. |
 | D11 | Helper scope | Shared helpers `getCurrentProfile`, `hasRole`, `requireRole`, `canAccessPath`, `dashboardFor`, used by the proxy and the four section layouts. Existing `/api/*` routes and `lib/client-auth.ts` storage sessions are unchanged. | Respects "do not modify unrelated modules". |
 | D12 | `profiles` columns | `clerk_user_id` (PK), `email` (unique, lowercase), `first_name`, `last_name`, `phone`, `role` (one of the four), `status` (`active`, `suspended`, `deactivated`), `created_at`, `updated_at`. | Revised in rev 2: admin module needs three account states. |
-| D13 | Migrating existing admins | One-off script creates each existing admin in Clerk via invitation (they set their own password) and inserts a `profiles` row with role `admin`. After migration, the Supabase admin path no longer grants access. | Repeatable and auditable; no passwords copied. |
+| D13 | Migrating existing Supabase users | One-off script migrates every `identities` row (admin, client, provider). For each, it reuses the Clerk user with the same verified email or creates one through the Clerk Backend API with a verified email and no password, then inserts a `profiles` row with the existing role. Users set their own password through the existing "Forgot password" flow. After migration, a Supabase Auth session no longer grants access to any protected area. | Revised in rev 3: nobody is locked out; a Clerk invitation creates no user until accepted, so a profile keyed by `clerk_user_id` could not be written at invitation time. No passwords copied. |
 | D14 | When a new user's profile is created | On the first authenticated server request, through one creation path, before any role check. | Matches the existing lazy pattern; no new public webhook endpoint or secret. |
 | D15 | Assigning `payroll_master`/`admin` | Script `npm run role:set -- <email> <role>` updates `profiles` and the Clerk mirror. | Keeps this feature focused on access control. |
 | D16 | Suspended/deactivated profile or changed role | Re-checked against the database on every protected page load. Suspended or deactivated users are signed out and see "This account is suspended" or "This account is deactivated" on `/login`; a changed role redirects to the new dashboard. | Revocation takes effect without waiting for session expiry. |
@@ -79,8 +80,8 @@ Data and roles
 
 Admin migration
 
-- AC9: WHEN the admin migration script runs, THE SYSTEM SHALL send a Clerk invitation to each `identities` row with role `admin` and create its `profiles` row with role `admin`, skipping admins already migrated.
-- AC10: WHEN admin migration has run, THE SYSTEM SHALL no longer grant `/admin` access through a Supabase Auth session, and SHALL no longer reject Clerk sign-ins for those admin emails.
+- AC9: WHEN the migration script runs, THE SYSTEM SHALL, for each `identities` row, reuse or create a passwordless Clerk user with that verified email and create its `profiles` row with the same role, skipping rows whose email already has a profile, and print each migrated email and role.
+- AC10: WHEN migration has run, THE SYSTEM SHALL no longer grant access to any protected area through a Supabase Auth session, and SHALL no longer reject Clerk sign-ins for emails that are admins in `identities`.
 
 Route protection
 
@@ -122,3 +123,4 @@ Helpers
 
 - 2026-10-09: revision 1 approved by the user.
 - 2026-10-09: revision 2; changed D12, D16, AC17, Follow-ups; affected plans none (not yet planned); reason: user approved the admin module (20261009-admin-module).
+- 2026-10-12: revision 3; changed D13, AC9, AC10, Problem facts; affected plans none (not yet planned); reason: user decided during planning to migrate all Supabase-only users (not only admins) and to create passwordless Clerk users instead of invitations, because invitations create no user ID to key `profiles` on.

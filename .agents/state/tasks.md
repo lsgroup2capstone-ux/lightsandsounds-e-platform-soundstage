@@ -6,7 +6,7 @@ lines to `archive/YYYY-MM.md` at the start of each month.
 | Feature | Status | Current plan | Owner | Updated | Checks |
 | --- | --- | --- | --- | --- | --- |
 | [20261007-standalone-frontend-copy](../features/20261007-standalone-frontend-copy/) | in-progress (plan 3 of 5) | 3 of 5 | implementer | 2026-10-07 | plans 1-2 typecheck/build pass; SDD doctor has 2 pre-existing mirror failures |
-| [20261009-role-based-access](../features/20261009-role-based-access/) | spec-approved (rev 2) | - | planner | 2026-10-09 | - |
+| [20261009-role-based-access](../features/20261009-role-based-access/) | plan-approved (spec rev 3) | 1 of 4 | implementer | 2026-10-12 | baseline: typecheck pass, test 41/41 pass, lint not installed |
 | [20261009-booking-schedule](../features/20261009-booking-schedule/) | spec-approved (rev 4) | - | planner | 2026-10-09 | - |
 | [20261009-paymongo-payments](../features/20261009-paymongo-payments/) | spec-approved (rev 3) | - | planner | 2026-10-09 | plan with booking-schedule |
 | [20261009-refund-module](../features/20261009-refund-module/) | spec-approved | - | planner | 2026-10-09 | plan after booking-schedule and payments |
