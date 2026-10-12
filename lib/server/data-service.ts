@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js"
 import type { AppIdentity } from "./clerk-auth"
 import { getDatabase } from "./database"
 import { MemoryStorage } from "../memory-storage"
-import { context, storage, session } from "./runtime"
+import { context, storage, session, queueDelete } from "./runtime"
 import * as auth from "./domain/client-auth"
 import * as bookings from "./domain/client-bookings"
 import * as services from "./domain/provider-services"
@@ -16,8 +16,8 @@ import { isAreaCovered, getTownDistance, getTransportationFee } from "../booking
 import { importLegacyRecords } from "./legacy-import"
 import { createBackup, previewBackup, restoreBackup } from "./backup"
 import { RequestError } from "./request-error"
-import { KIND_RULES, buildKey, isFileKind, isOwnKey } from "./file-keys"
-import { deleteObject, presignGet, presignPut, publicBaseUrl } from "./r2"
+import { KIND_RULES, buildKey, isDataUrl, isFileKind, isOwnKey, type FileKind } from "./file-keys"
+import { deleteObject, headObject, presignGet, presignPut, publicBaseUrl } from "./r2"
 
 export { RequestError }
 const accountsKey = "soundstage-accounts-v2"
@@ -60,19 +60,30 @@ function ownsProviderBooking(actor: ClientAccount, booking?: Booking) {
   const own = JSON.parse(storage.getItem(keyFor(servicePrefix, actor.email)) || "[]") as { id: string }[]
   return own.some(s => s.id === booking.packageId)
 }
-function serviceInput(value: unknown) {
+// An unchanged value skips the HEAD so legacy base64 stays saveable until migration.
+async function verifiedKey(kind: FileKind, email: string, value: unknown, previous?: string) {
+  const key = String(value || "")
+  if (!key) return ""
+  if (key === previous) return key
+  if (isDataUrl(key) || !isOwnKey(kind, email, key)) throw new RequestError("Upload the file again.")
+  const head = await headObject(key)
+  if (!head || head.size > KIND_RULES[kind].maxBytes || !KIND_RULES[kind].types.includes(head.type)) throw new RequestError("The upload did not finish. Please try again.")
+  return key
+}
+async function serviceInput(value: unknown, previous: { id: string; image: string }[] = []) {
   const a = requireRole("provider")
   const v = record(value)
   const id = text(v.id, 100)
   if (Object.entries(storage.values).some(([k, raw]) => k.startsWith(servicePrefix) && k !== keyFor(servicePrefix, a.email) && JSON.parse(raw).some((s: { id: string }) => s.id === id))) throw new RequestError("Service ID already exists.")
-  return { id, name: text(v.name, 200), location: text(v.location, 200), coverageAreas: text(v.coverageAreas || v.location, 2000), transportationFee: finite(v.transportationFee || 0), description: String(v.description || "").slice(0, 5000), price: finite(v.price, 1), image: String(v.image || "").slice(0, 1500000), providerName: providerName(a), active: v.active === true, bookings: 0 }
+  return { id, name: text(v.name, 200), location: text(v.location, 200), coverageAreas: text(v.coverageAreas || v.location, 2000), transportationFee: finite(v.transportationFee || 0), description: String(v.description || "").slice(0, 5000), price: finite(v.price, 1), image: await verifiedKey("service-image", a.email, v.image, previous.find(s => s.id === id)?.image), providerName: providerName(a), active: v.active === true, bookings: 0 }
 }
-function updateProfile(value: unknown, role: "client" | "provider") {
+async function updateProfile(value: unknown, role: "client" | "provider") {
   const actor = requireRole(role)
   const input = record(value)
   if (input.email && String(input.email).toLowerCase() !== actor.email.toLowerCase()) throw new RequestError("Email changes require verification through Supabase Auth; contact support.")
   const changes: Record<string, string> = {}
-  for (const key of ["firstName", "lastName", "mobile", "business", "bio", "profileImage"]) if (key in input && (role === "provider" || !["business", "bio"].includes(key))) changes[key] = String(input[key] || "").slice(0, key === "profileImage" ? 1500000 : 2000)
+  for (const key of ["firstName", "lastName", "mobile", "business", "bio", "profileImage"]) if (key in input && (role === "provider" || !["business", "bio"].includes(key))) changes[key] = String(input[key] || "").slice(0, 2000)
+  if ("profileImage" in input) changes.profileImage = await verifiedKey("profile-image", actor.email, input.profileImage, actor.profileImage)
   if (changes.business && changes.business !== actor.business) {
     if (allAccounts().some(a => a.email !== actor.email && a.role === "provider" && providerName(a) === changes.business)) throw new RequestError("That business name is already registered.")
   }
@@ -84,6 +95,7 @@ function updateProfile(value: unknown, role: "client" | "provider") {
     storage.setItem(ownKey, JSON.stringify(own.map((s: object) => ({ ...s, providerName: providerName(result) }))))
     for (const [key, raw] of Object.entries(storage.values)) if (key.startsWith(bookingPrefix)) storage.setItem(key, JSON.stringify(JSON.parse(raw).map((b: Booking) => ids.has(b.packageId) ? { ...b, provider: providerName(result) } : b)))
   }
+  if (result && actor.profileImage !== result.profileImage && isOwnKey("profile-image", actor.email, actor.profileImage)) queueDelete(actor.profileImage!)
   return result
 }
 
@@ -201,20 +213,43 @@ export const actions: Record<string, (...args: any[]) => unknown> = {
   },
   updateProviderAccount: v => updateProfile(v, "provider"),
   updateClientAccount: v => updateProfile(v, "client"),
-  submitProviderApplication: docs => { requireRole("provider"); if (!Array.isArray(docs)) throw new RequestError("Invalid documents."); return auth.submitProviderApplication(docs) },
+  submitProviderApplication: async docs => {
+    const actor = requireRole("provider")
+    if (!Array.isArray(docs)) throw new RequestError("Invalid documents.")
+    try { auth.validateProviderDocuments(docs, actor.email) } catch (error) { throw new RequestError((error as Error).message) }
+    for (const doc of docs) {
+      const head = await headObject(doc.key)
+      if (!head || head.size > KIND_RULES["provider-document"].maxBytes || !KIND_RULES["provider-document"].types.includes(head.type)) throw new RequestError("The upload did not finish. Please try again.")
+    }
+    const previous = actor.application?.documents || []
+    const result = auth.submitProviderApplication(docs)
+    for (const old of previous) if (isOwnKey("provider-document", actor.email, old.key) && !docs.some(d => d.key === old.key)) queueDelete(old.key)
+    return result
+  },
   reviewProviderApplication: (email, status, reason) => { requireRole("admin"); return auth.reviewProviderApplication(text(email, 254), status, String(reason || "").slice(0, 1000)) },
-  saveProviderService: v => {
-    const service = serviceInput(v)
+  saveProviderService: async v => {
+    const service = await serviceInput(v)
     if (services.getProviderServices("current").some(s => s.id === service.id)) throw new RequestError("This service already exists.")
     return services.saveProviderService(service)
   },
-  updateProviderServices: values => {
+  updateProviderServices: async values => {
     if (!Array.isArray(values) || values.length > 500) throw new RequestError("Invalid services.")
-    const next = values.map(serviceInput)
+    const actor = requireRole("provider")
+    const current = services.getProviderServices("current")
+    const next = await Promise.all(values.map(v => serviceInput(v, current)))
     if (new Set(next.map(s => s.id)).size !== next.length) throw new RequestError("Duplicate services.")
     const retained = new Set(next.map(s => s.id))
     for (const old of services.getProviderServices("current")) if (!retained.has(old.id) && bookings.getAllBookings().some(b => b.packageId === old.id)) throw new RequestError("Deactivate services with existing bookings instead of deleting them.")
-    return services.updateProviderServices(next)
+    const result = services.updateProviderServices(next)
+    for (const old of current) {
+      const kept = next.find(s => s.id === old.id)
+      if (kept?.image === old.image) continue
+      // Bookings copy the service image, so they follow the new key.
+      if (kept) for (const [key, raw] of Object.entries(storage.values)) if (key.startsWith(bookingPrefix)) storage.setItem(key, JSON.stringify(JSON.parse(raw).map((b: Booking) => b.packageId === old.id ? { ...b, image: kept.image } : b)))
+      // Another saved service may still use the old key (renamed id or shared image).
+      if (isOwnKey("service-image", actor.email, old.image) && !next.some(s => s.image === old.image)) queueDelete(old.image)
+    }
+    return result
   },
   saveClientBooking: async value => {
     const actor = requireRole("client")

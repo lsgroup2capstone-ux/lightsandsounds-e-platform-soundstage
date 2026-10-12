@@ -72,9 +72,9 @@ test('public/private snapshots exclude documents, customer bookings and billing'
 test('profile edits cannot elevate roles; date blocks are enforced by the server', async () => {
   const state = fixture()
   await context.run(state, async () => {
-    actions.updateClientAccount({ role: 'admin', application: { status: 'Approved' }, firstName: 'Updated' })
+    await actions.updateClientAccount({ role: 'admin', application: { status: 'Approved' }, firstName: 'Updated' })
     assert.equal(JSON.parse(visibleRecords()['soundstage-accounts-v2']).find(a => a.email === client.email).role, 'client')
-    assert.throws(() => actions.updateClientAccount({ email: 'stolen@test.com' }), /verification/)
+    await assert.rejects(actions.updateClientAccount({ email: 'stolen@test.com' }), /verification/)
     state.session.setItem('soundstage-session', JSON.stringify(provider))
     actions.toggleScheduleDate('2027-01-01')
     state.session.setItem('soundstage-session', JSON.stringify(client))

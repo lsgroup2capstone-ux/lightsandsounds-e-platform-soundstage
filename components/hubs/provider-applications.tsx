@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
 function Documents({ documents }: { documents: ProviderDocument[] }) {
-  return <div className="space-y-2">{documents.map((doc, index) => <div key={index} className="rounded-md border p-3"><p className="break-all text-sm">{doc.name}</p><a className="text-sm text-primary underline" href={doc.data} download={doc.name}>Download document for review</a>{doc.type.startsWith("image/") && <img src={doc.data} alt={doc.name} className="mt-2 max-h-64 max-w-full object-contain" />}</div>)}</div>
+  return <div className="space-y-2">{documents.map((doc, index) => <div key={index} className="rounded-md border p-3"><p className="break-all text-sm">{doc.name}</p><a className="text-sm text-primary underline" href={(doc as { data?: string }).data} download={doc.name}>Download document for review</a>{doc.type.startsWith("image/") && <img src={(doc as { data?: string }).data} alt={doc.name} className="mt-2 max-h-64 max-w-full object-contain" />}</div>)}</div>
 }
 export function ProviderApplications({ admin = false }: { admin?: boolean }) {
   const [accounts, setAccounts] = useState<ClientAccount[]>([])

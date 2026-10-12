@@ -43,7 +43,13 @@ test('full server workflows persist in PostgreSQL and roll back conflicting writ
     await db.exec(readFileSync('database/schema.sql', 'utf8'))
     for (const u of [admin, provider, client, outsider]) await db.query('INSERT INTO auth.users(id) VALUES ($1)', [u.id])
     await execute(admin)
-    await execute(provider, 'submitProviderApplication', [[{ name: 'permit.pdf', type: 'application/pdf', data: 'data:application/pdf;base64,JVBERi0=' }]])
+    const owner = require('node:crypto').createHash('sha256').update(provider.email).digest('hex').slice(0, 32)
+    const r2Env = { R2_ACCOUNT_ID: 'acct', R2_ACCESS_KEY_ID: 'AKID', R2_SECRET_ACCESS_KEY: 'secret', R2_BUCKET: 'bucket', R2_PUBLIC_URL: 'https://pub.r2.dev' }
+    const savedEnv = Object.fromEntries(Object.keys(r2Env).map(name => [name, process.env[name]])), realFetch = global.fetch
+    Object.assign(process.env, r2Env)
+    global.fetch = async () => new Response(null, { status: 200, headers: { 'content-length': '10', 'content-type': 'application/pdf' } })
+    try { await execute(provider, 'submitProviderApplication', [[{ name: 'permit.pdf', type: 'application/pdf', key: `private/provider-docs/${owner}/${'0'.repeat(32)}.pdf`, size: 10 }]]) }
+    finally { global.fetch = realFetch; for (const [name, value] of Object.entries(savedEnv)) if (value === undefined) delete process.env[name]; else process.env[name] = value }
     const google = { id: 'user_google_provider', authSource: 'clerk', email: provider.email, app_metadata: { provider: 'google' }, user_metadata: {} }
     const clerkEmail = { ...google, app_metadata: { provider: 'email' } }
     const emailState = await execute(clerkEmail, undefined, [], 'client')

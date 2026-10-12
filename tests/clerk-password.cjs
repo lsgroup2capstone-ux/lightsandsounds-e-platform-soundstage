@@ -44,7 +44,7 @@ function fixture(role = 'client') {
 test('both roles sign up in Clerk, verify email and retain provider documents', async () => {
   for (const role of ['client', 'provider']) {
     const { auth, calls, account } = fixture(role)
-    const documents = [{ name: 'permit.pdf', type: 'application/pdf', data: 'data:application/pdf;base64,JVBERi0=' }]
+    const documents = [{ name: 'permit.pdf', type: 'application/pdf', key: 'private/provider-docs/owner/file.pdf', size: 10 }]
     const profile = { ...account, firstName: 'Test', lastName: 'User', mobile: '09171234567', ...(role === 'provider' ? { application: { documents } } : {}) }
     await assert.rejects(auth.savePendingAccount({ ...profile, role: 'admin' }, 'Correct-pass1!'), /Administrator/)
     assert.equal(await auth.savePendingAccount(profile, 'Correct-pass1!'), false)

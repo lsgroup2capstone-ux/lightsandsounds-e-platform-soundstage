@@ -1,6 +1,7 @@
 import { storage, session, events } from "../runtime"
+import { isOwnKey } from "../file-keys"
 import { ensureProviderTrial, migrateProviderBilling, recordAdminAction, recordMarketplaceAction } from "./marketplace-billing"
-export type ProviderDocument = { name: string; type: string; data: string }
+export type ProviderDocument = { name: string; type: string; key: string; size: number }
 export type ProviderApplication = { status: "Pending" | "Approved" | "Rejected"; documents: ProviderDocument[]; submittedAt: string; reviewedAt?: string; reason?: string }
 export type AccountRole = "client" | "provider" | "admin"
 export type ClientAccount = { firstName: string; lastName: string; email: string; mobile: string; role: AccountRole; application?: ProviderApplication; business?: string; bio?: string; profileImage?: string; authMethod: "email" | "phone" | "google" }
@@ -21,17 +22,16 @@ function setSession(account: Pick<ClientAccount, "role" | "email">) { if (accoun
 function readSession(): AccountSession | null { try { return JSON.parse(session.getItem(SESSION_KEY) || "null") as AccountSession | null } catch { return null } }
 function readAdminAccount(): StoredAccount | null { try { return JSON.parse(storage.getItem(ADMIN_ACCOUNT_KEY) || "null") } catch { return null } }
 export function isProviderApproved(email: string) { return findAccount("provider", email)?.application?.status === "Approved" }
-export function validateProviderDocuments(documents: ProviderDocument[]) {
-  if (!documents.length || documents.length > 4) throw new Error("Upload 1 to 4 documents, including your business permit and valid ID.")
-  if (documents.reduce((sum, doc) => sum + doc.data.length, 0) > 1400000) throw new Error("Documents must total 1 MB or less.")
-  if (documents.some(doc => !["application/pdf", "image/jpeg", "image/png"].includes(doc.type) || !doc.data.startsWith(`data:${doc.type};base64,`) || !doc.name)) throw new Error("Only PDF, JPG and PNG documents are supported.")
+export function validateProviderDocuments(documents: ProviderDocument[], ownerEmail: string) {
+  if (!Array.isArray(documents) || !documents.length || documents.length > 4) throw new Error("Upload 1 to 4 documents, including your business permit and valid ID.")
+  if (documents.some(doc => !doc || typeof doc.name !== "string" || !doc.name.trim() || doc.name.length > 200 || !["application/pdf", "image/jpeg", "image/png"].includes(doc.type) || !Number.isInteger(doc.size) || doc.size < 1 || doc.size > 5 * 1024 * 1024 || Object.hasOwn(doc, "data") || !isOwnKey("provider-document", ownerEmail, doc.key))) throw new Error("Upload PDF, JPG or PNG documents of up to 5 MB each.")
 }
 export function submitProviderApplication(documents: ProviderDocument[]) {
   const account = getAccount()
   if (account?.role !== "provider") throw new Error("Provider access required.")
   if (account.application && account.application.status !== "Rejected") throw new Error("Your application has already been submitted.")
-  validateProviderDocuments(documents)
-  saveAccount({ ...account, application: { status: "Pending", documents, submittedAt: new Date().toISOString() } })
+  validateProviderDocuments(documents, account.email)
+  saveAccount({ ...account, application: { status: "Pending", documents: documents.map(({ name, type, key, size }) => ({ name, type, key, size })), submittedAt: new Date().toISOString() } })
   recordMarketplaceAction("Provider application submitted", account.email, account.application?.status || "Not submitted", "Pending")
   events.dispatchEvent(new Event("soundstage-account-updated"))
 }
@@ -41,7 +41,7 @@ export function reviewProviderApplication(email: string, status: "Approved" | "R
   if (!account?.application || account.application.status !== "Pending") throw new Error("This application is no longer pending.")
   if (!["Approved", "Rejected"].includes(status)) throw new Error("Invalid decision.")
   if (status === "Rejected" && reason.trim().length < 3) throw new Error("Give a reason for rejection.")
-  validateProviderDocuments(account.application.documents)
+  validateProviderDocuments(account.application.documents, account.email)
   saveAccount({ ...account, application: { ...account.application, status, reason: reason.trim(), reviewedAt: new Date().toISOString() } })
   if (status === "Approved") ensureProviderTrial(email)
   recordAdminAction("Provider application reviewed", email, "Pending", `${status}${reason.trim() ? ": " + reason.trim() : ""}`)

@@ -1,15 +1,17 @@
 const { readFileSync } = require('node:fs')
-const { transpileModule, ModuleKind } = require('typescript')
+const { transpileModule, ModuleKind, ScriptTarget } = require('typescript')
 const assert = require('node:assert/strict')
 const Module = require('node:module')
 const storage = () => { const values = new Map(); return { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key) } }
 global.localStorage = storage(); global.sessionStorage = storage(); global.window = { dispatchEvent() {} }
 const trials = [], audits = []
+const keysModule = new Module('file-keys-test')
+keysModule._compile(transpileModule(readFileSync('lib/server/file-keys.ts', 'utf8'), { compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 } }).outputText, 'file-keys-test.js')
 const file = new Module('applications-test')
-file.require = name => name === "../runtime" ? { storage: global.localStorage, session: global.sessionStorage, events: global.window } : name === './marketplace-billing' ? { ensureProviderTrial: email => trials.push(email), migrateProviderBilling() {}, recordAdminAction: (...args) => audits.push(args), recordMarketplaceAction: (...args) => audits.push(args) } : require(name)
+file.require = name => name === '../file-keys' ? keysModule.exports : name === "../runtime" ? { storage: global.localStorage, session: global.sessionStorage, events: global.window } : name === './marketplace-billing' ? { ensureProviderTrial: email => trials.push(email), migrateProviderBilling() {}, recordAdminAction: (...args) => audits.push(args), recordMarketplaceAction: (...args) => audits.push(args) } : require(name)
 file._compile(transpileModule(readFileSync('lib/server/domain/client-auth.ts', 'utf8'), { compilerOptions: { module: ModuleKind.CommonJS } }).outputText, 'applications-test.js')
 const auth = file.exports
-const documents = [{ name: 'permit.pdf', type: 'application/pdf', data: 'data:application/pdf;base64,JVBERi0=' }]
+const documents = [{ name: 'permit.pdf', type: 'application/pdf', key: keysModule.exports.buildKey('provider-document', 'provider@example.com', '0123456789abcdef0123456789abcdef', 'application/pdf'), size: 1024 }]
 const account = { role: 'provider', email: 'provider@example.com', firstName: 'Test', lastName: 'Provider', business: 'Events', authMethod: 'email', application: { status: 'Pending', documents, submittedAt: new Date().toISOString() } }
 localStorage.setItem('soundstage-accounts-v2', JSON.stringify([account]))
 sessionStorage.setItem('soundstage-session', JSON.stringify({ role: account.role, email: account.email }))
@@ -35,5 +37,10 @@ assert.throws(() => auth.reviewProviderApplication(account.email, 'Approved', 'A
 assert.ok(audits.some(row => row[0] === 'Provider application reviewed'))
 sessionStorage.setItem('soundstage-session', JSON.stringify({ role: account.role, email: account.email }))
 assert.equal(auth.getAccount().application.documents[0].name, 'permit.pdf')
-assert.throws(() => auth.validateProviderDocuments([{ name: 'bad.html', type: 'text/html', data: 'data:text/html;base64,AAAA' }]))
+const doc = documents[0]
+for (const bad of [{ ...doc, type: 'text/html' }, { ...doc, size: 0 }, { ...doc, size: 5 * 1024 * 1024 + 1 }, { ...doc, name: '' }, { ...doc, name: 'x'.repeat(201) }, { ...doc, data: 'data:application/pdf;base64,AA' }, { ...doc, key: 'data:application/pdf;base64,AA' }])
+  assert.throws(() => auth.validateProviderDocuments([bad], account.email))
+assert.throws(() => auth.validateProviderDocuments(documents, 'other@example.com'))
+assert.throws(() => auth.validateProviderDocuments([doc, doc, doc, doc, doc], account.email))
+auth.validateProviderDocuments(documents, account.email)
 console.log('Provider application checks passed: documents, pending signup, trial timing, admin authorization, rejection, resubmission, approval, duplicate review, Supabase identity and audit.')

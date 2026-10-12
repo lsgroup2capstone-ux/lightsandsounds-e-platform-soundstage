@@ -180,7 +180,7 @@ export function updateProviderAccount(changes: Partial<Pick<ClientAccount, "firs
 export function updateClientAccount(changes: Partial<Pick<ClientAccount, "firstName" | "lastName" | "email" | "mobile" | "profileImage">>) { return mutate<ClientAccount>("updateClientAccount", [changes]) }
 export function submitProviderApplication(documents: ProviderDocument[]) { return mutate("submitProviderApplication", [documents]) }
 export function reviewProviderApplication(email: string, status: "Approved" | "Rejected", reason: string) { return mutate("reviewProviderApplication", [email, status, reason]) }
-export type ProviderDocument = { name: string; type: string; data: string }
+export type ProviderDocument = { name: string; type: string; key: string; size: number }
 export type ProviderApplication = { status: "Pending" | "Approved" | "Rejected"; documents: ProviderDocument[]; submittedAt: string; reviewedAt?: string; reason?: string }
 export type AccountRole = "client" | "provider" | "admin"
 export type ClientAccount = { firstName: string; lastName: string; email: string; mobile: string; role: AccountRole; application?: ProviderApplication; business?: string; bio?: string; profileImage?: string; authMethod: "email" | "phone" | "google" }
@@ -195,14 +195,14 @@ function findAccount(role: AccountRole, email: string) { return readAccounts().f
 function readSession(): AccountSession | null { try { return JSON.parse(sessionView.getItem(SESSION_KEY) || "null") as AccountSession | null } catch { return null } }
 function readAdminAccount(): StoredAccount | null { try { return JSON.parse(appStorage.getItem(ADMIN_ACCOUNT_KEY) || "null") } catch { return null } }
 export function isProviderApproved(email: string) { return findAccount("provider", email)?.application?.status === "Approved" }
+// Shape checks only; the server also checks that each key belongs to the provider.
 export function validateProviderDocuments(documents: ProviderDocument[]) {
   if (!documents.length || documents.length > 4) throw new Error("Upload 1 to 4 documents, including your business permit and valid ID.")
-  if (documents.reduce((sum, doc) => sum + doc.data.length, 0) > 1400000) throw new Error("Documents must total 1 MB or less.")
-  if (documents.some(doc => !["application/pdf", "image/jpeg", "image/png"].includes(doc.type) || !doc.data.startsWith(`data:${doc.type};base64,`) || !doc.name)) throw new Error("Only PDF, JPG and PNG documents are supported.")
+  if (documents.some(doc => !doc.name.trim() || doc.name.length > 200 || !["application/pdf", "image/jpeg", "image/png"].includes(doc.type) || !Number.isInteger(doc.size) || doc.size < 1 || doc.size > 5 * 1024 * 1024 || !doc.key || Object.hasOwn(doc, "data"))) throw new Error("Upload PDF, JPG or PNG documents of up to 5 MB each.")
 }
 export async function readProviderDocuments(files: File[]): Promise<ProviderDocument[]> {
   if (files.reduce((sum, file) => sum + file.size, 0) > 1024 * 1024) throw new Error("Documents must total 1 MB or less.")
-  const documents = await Promise.all(files.map(file => new Promise<ProviderDocument>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve({ name: file.name, type: file.type, data: String(reader.result) }); reader.onerror = () => reject(new Error("Could not read document.")); reader.readAsDataURL(file) })))
+  const documents = await Promise.all(files.map(file => new Promise<ProviderDocument>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve({ name: file.name, type: file.type, key: String(reader.result), size: file.size }); reader.onerror = () => reject(new Error("Could not read document.")); reader.readAsDataURL(file) })))
   validateProviderDocuments(documents)
   return documents
 }
