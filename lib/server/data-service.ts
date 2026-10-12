@@ -15,8 +15,11 @@ import type { Booking } from "../mock-data"
 import { isAreaCovered, getTownDistance, getTransportationFee } from "../booking-pricing"
 import { importLegacyRecords } from "./legacy-import"
 import { createBackup, previewBackup, restoreBackup } from "./backup"
+import { RequestError } from "./request-error"
+import { KIND_RULES, buildKey, isFileKind, isOwnKey } from "./file-keys"
+import { deleteObject, presignGet, presignPut, publicBaseUrl } from "./r2"
 
-export class RequestError extends Error { constructor(message: string, public status = 400) { super(message) } }
+export { RequestError }
 const accountsKey = "soundstage-accounts-v2"
 const bookingPrefix = "soundstage-client-bookings-v3:"
 const servicePrefix = "soundstage-provider-services-v2:"
@@ -173,6 +176,29 @@ export const actions: Record<string, (...args: any[]) => unknown> = {
     storage.setItem(key, JSON.stringify(blocked ? dates.filter(d => d !== date) : [...dates, date]))
     billing.recordMarketplaceAction("Schedule availability changed", date, blocked ? "Blocked" : "Available", blocked ? "Available" : "Blocked")
   },
+  createUploadUrl: async (kind, meta) => {
+    if (!isFileKind(kind)) throw new RequestError("Unknown upload type.")
+    const rules = KIND_RULES[kind]
+    const actor = requireRole(...rules.roles)
+    const m = record(meta)
+    const type = String(m.type || ""), size = m.size
+    if (!rules.types.includes(type) || typeof size !== "number" || !Number.isInteger(size) || size <= 0 || size > rules.maxBytes) throw new RequestError(rules.message)
+    if (kind === "service-image" && m.serviceId !== undefined) {
+      const serviceId = text(m.serviceId, 100)
+      if (Object.entries(storage.values).some(([k, raw]) => k.startsWith(servicePrefix) && k !== keyFor(servicePrefix, actor.email) && JSON.parse(raw).some((s: { id: string }) => s.id === serviceId))) throw new RequestError("You can only upload images for your own services.", 403)
+    }
+    const key = buildKey(kind, actor.email, crypto.randomUUID(), type)
+    return { key, ...(await presignPut(key, type, size, 600)) }
+  },
+  getProviderDocumentUrl: async (email, index) => {
+    const actor = requireRole("provider", "admin")
+    const owner = text(email, 254).toLowerCase()
+    if (actor.role !== "admin" && actor.email.toLowerCase() !== owner) throw new RequestError("You do not have permission for this operation.", 403)
+    const doc = allAccounts().find(a => a.role === "provider" && a.email.toLowerCase() === owner)?.application?.documents[Number.isInteger(index) ? index : -1] as { name: string; type: string; key?: string } | undefined
+    if (!doc) throw new RequestError("Document not found.", 404)
+    if (!isOwnKey("provider-document", owner, doc.key)) throw new RequestError("This document has not been moved to file storage yet.", 409)
+    return { ...(await presignGet(doc.key!, 300, doc.name)), name: doc.name, type: doc.type }
+  },
   updateProviderAccount: v => updateProfile(v, "provider"),
   updateClientAccount: v => updateProfile(v, "client"),
   submitProviderApplication: docs => { requireRole("provider"); if (!Array.isArray(docs)) throw new RequestError("Invalid documents."); return auth.submitProviderApplication(docs) },
@@ -328,13 +354,14 @@ export async function execute(user: AppIdentity | null, action?: string, args: u
   if (action && !user) throw new RequestError("Sign in to continue.", 401)
   if (action && !Object.hasOwn(actions, action)) throw new RequestError("Unknown operation.", 404)
   const sql = getDatabase()
-  return sql.begin(async tx => {
+  const pendingDeletes: string[] = []
+  const response = await sql.begin(async tx => {
     // Serialize read/modify/write workflows so approvals, dates and balances stay consistent.
     await tx`select pg_advisory_xact_lock(74832019)`
     const rows = await tx<{ key: string; value: unknown }[]>`select key, value from soundstage.records`
     const originalValues = new Map(rows.map(r => [r.key, JSON.stringify(r.value)]))
     const values = Object.fromEntries(originalValues)
-    const state = { storage: new MemoryStorage(values), session: new MemoryStorage() }
+    const state = { storage: new MemoryStorage(values), session: new MemoryStorage(), pendingDeletes }
     return context.run(state, async () => {
       if (user) {
         const isClerk = user.authSource === "clerk"
@@ -383,7 +410,11 @@ export async function execute(user: AppIdentity | null, action?: string, args: u
         if (originalValues.get(key) !== value) await tx`insert into soundstage.records (key,value) values (${key},${tx.json(JSON.parse(value))}) on conflict (key) do update set value=excluded.value, updated_at=now()`
       }
       for (const row of rows) if (!(row.key in storage.values)) await tx`delete from soundstage.records where key=${row.key}`
-      return { records: visibleRecords(), session: { ...session.values }, result }
+      return { records: visibleRecords(), session: { ...session.values }, result, filesBaseUrl: publicBaseUrl() }
     })
   })
+  // A failed delete never undoes the committed action; the orphaned key is logged for cleanup.
+  const outcomes = await Promise.allSettled(pendingDeletes.map(key => deleteObject(key)))
+  outcomes.forEach((outcome, i) => { if (outcome.status === "rejected") console.error("R2 delete failed", { key: pendingDeletes[i] }) })
+  return response
 }

@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks"
 import { MemoryStorage } from "../memory-storage"
 
-export const context = new AsyncLocalStorage<{ storage: MemoryStorage; session: MemoryStorage }>()
+export const context = new AsyncLocalStorage<{ storage: MemoryStorage; session: MemoryStorage; pendingDeletes?: string[] }>()
 function current(key: "storage" | "session") {
   const state = context.getStore()
   if (!state) throw new Error("Database operation requires a request context.")
@@ -13,3 +13,10 @@ function proxy(key: "storage" | "session"): MemoryStorage {
 export const storage = proxy("storage")
 export const session = proxy("session")
 export const events = { dispatchEvent(_event: Event) { return true } }
+// R2 objects are removed only after the request's transaction commits.
+export function queueDelete(key: string) {
+  const state = context.getStore()
+  if (!state) throw new Error("Database operation requires a request context.")
+  if (!state.pendingDeletes) state.pendingDeletes = []
+  if (key && !state.pendingDeletes.includes(key)) state.pendingDeletes.push(key)
+}
