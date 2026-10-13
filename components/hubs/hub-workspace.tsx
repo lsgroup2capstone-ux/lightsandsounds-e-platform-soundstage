@@ -31,6 +31,7 @@ import { appStorage, mutate } from "@/lib/app-store"
 import { SystemActivityPanel } from "./system-activity"
 
 import { ProviderApplications } from "./provider-applications"
+import { publicFileUrl, uploadFile } from "@/lib/file-upload"
 
 function Status({ children }: { children: string }) {
   return <Badge variant="outline" className={hubStatus(children)}>{children}</Badge>
@@ -142,15 +143,15 @@ function ProviderSettings({ account, onSaved, notify }: { account: ClientAccount
     if (account) setProfile({ business: account.business || "", firstName: account.firstName, lastName: account.lastName, email: account.email, mobile: account.mobile, bio: account.bio || "", profileImage: account.profileImage || "" })
   }, [account])
 
-  function selectImage(event: React.ChangeEvent<HTMLInputElement>) {
+  async function selectImage(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
+    event.target.value = ""
     if (!file) return
-    if (!file.type.startsWith("image/")) return setError("Choose a JPG, PNG, or WebP image.")
-    if (file.size > 2 * 1024 * 1024) return setError("Business logo must be 2MB or smaller.")
-    const reader = new FileReader()
-    reader.onload = () => { setProfile((current) => ({ ...current, profileImage: String(reader.result) })); setError("") }
-    reader.onerror = () => setError("The selected image could not be read.")
-    reader.readAsDataURL(file)
+    setError("")
+    try {
+      const key = await uploadFile("profile-image", file)
+      setProfile((current) => ({ ...current, profileImage: key }))
+    } catch (error) { setError((error as Error).message) }
   }
 
   async function save(event: React.FormEvent<HTMLFormElement>) { try {
@@ -163,7 +164,7 @@ function ProviderSettings({ account, onSaved, notify }: { account: ClientAccount
 
   if (!account) return <Card><CardContent className="p-6 text-sm text-muted-foreground">Loading profile...</CardContent></Card>
   const initials = `${profile.firstName[0] || ""}${profile.lastName[0] || ""}`.toUpperCase() || "SP"
-  return <Card className="max-w-2xl"><CardHeader><CardTitle>Provider profile</CardTitle><p className="text-sm text-muted-foreground">Update your business information and logo.</p></CardHeader><CardContent><form onSubmit={save} className="space-y-5"><div className="flex items-center gap-4"><div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-muted text-xl font-semibold text-primary">{profile.profileImage ? <img src={profile.profileImage} alt="Business logo preview" className="h-full w-full object-cover" /> : initials}</div><div><Label htmlFor="businessLogo" className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-border px-3 py-2"><ImagePlus width={16} />Upload business logo</Label><Input id="businessLogo" type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" onChange={selectImage} /><p className="mt-2 text-xs text-muted-foreground">JPG, PNG, or WebP, up to 2MB.</p>{profile.profileImage && <button type="button" className="mt-2 text-xs text-destructive" onClick={() => setProfile((current) => ({ ...current, profileImage: "" }))}>Remove logo</button>}</div></div><div className="grid gap-2"><Label htmlFor="providerBusiness">Business name</Label><Input id="providerBusiness" value={profile.business} onChange={(event) => setProfile({ ...profile, business: event.target.value })} required /></div><div className="grid gap-4 sm:grid-cols-2"><div className="grid gap-2"><Label htmlFor="providerFirstName">First name</Label><Input id="providerFirstName" value={profile.firstName} onChange={(event) => setProfile({ ...profile, firstName: event.target.value })} required /></div><div className="grid gap-2"><Label htmlFor="providerLastName">Last name</Label><Input id="providerLastName" value={profile.lastName} onChange={(event) => setProfile({ ...profile, lastName: event.target.value })} required /></div></div><div className="grid gap-2"><Label htmlFor="providerEmail">Email address</Label><Input id="providerEmail" type="email" readOnly value={profile.email} onChange={(event) => setProfile({ ...profile, email: event.target.value })} required /></div><div className="grid gap-2"><Label htmlFor="providerMobile">Mobile number</Label><Input id="providerMobile" type="tel" value={profile.mobile} onChange={(event) => setProfile({ ...profile, mobile: event.target.value })} required /></div><div className="grid gap-2"><Label htmlFor="providerBio">Business description</Label><textarea id="providerBio" value={profile.bio} onChange={(event) => setProfile({ ...profile, bio: event.target.value })} rows={4} className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50" placeholder="Tell clients about your business." /></div>{error && <p role="alert" className="text-sm text-destructive">{error}</p>}<Button type="submit">Save profile</Button></form></CardContent></Card>
+  return <Card className="max-w-2xl"><CardHeader><CardTitle>Provider profile</CardTitle><p className="text-sm text-muted-foreground">Update your business information and logo.</p></CardHeader><CardContent><form onSubmit={save} className="space-y-5"><div className="flex items-center gap-4"><div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-muted text-xl font-semibold text-primary">{profile.profileImage ? <img src={publicFileUrl(profile.profileImage)} alt="Business logo preview" className="h-full w-full object-cover" /> : initials}</div><div><Label htmlFor="businessLogo" className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-border px-3 py-2"><ImagePlus width={16} />Upload business logo</Label><Input id="businessLogo" type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={selectImage} /><p className="mt-2 text-xs text-muted-foreground">JPG, PNG, or WebP, up to 5MB.</p>{profile.profileImage && <button type="button" className="mt-2 text-xs text-destructive" onClick={() => setProfile((current) => ({ ...current, profileImage: "" }))}>Remove logo</button>}</div></div><div className="grid gap-2"><Label htmlFor="providerBusiness">Business name</Label><Input id="providerBusiness" value={profile.business} onChange={(event) => setProfile({ ...profile, business: event.target.value })} required /></div><div className="grid gap-4 sm:grid-cols-2"><div className="grid gap-2"><Label htmlFor="providerFirstName">First name</Label><Input id="providerFirstName" value={profile.firstName} onChange={(event) => setProfile({ ...profile, firstName: event.target.value })} required /></div><div className="grid gap-2"><Label htmlFor="providerLastName">Last name</Label><Input id="providerLastName" value={profile.lastName} onChange={(event) => setProfile({ ...profile, lastName: event.target.value })} required /></div></div><div className="grid gap-2"><Label htmlFor="providerEmail">Email address</Label><Input id="providerEmail" type="email" readOnly value={profile.email} onChange={(event) => setProfile({ ...profile, email: event.target.value })} required /></div><div className="grid gap-2"><Label htmlFor="providerMobile">Mobile number</Label><Input id="providerMobile" type="tel" value={profile.mobile} onChange={(event) => setProfile({ ...profile, mobile: event.target.value })} required /></div><div className="grid gap-2"><Label htmlFor="providerBio">Business description</Label><textarea id="providerBio" value={profile.bio} onChange={(event) => setProfile({ ...profile, bio: event.target.value })} rows={4} className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50" placeholder="Tell clients about your business." /></div>{error && <p role="alert" className="text-sm text-destructive">{error}</p>}<Button type="submit">Save profile</Button></form></CardContent></Card>
 }
 
 function ProviderServicesContent({ account, notify }: { account: ClientAccount | null; notify: (message: string) => void }) {
@@ -174,15 +175,12 @@ function ProviderServicesContent({ account, notify }: { account: ClientAccount |
   const [error, setError] = useState("")
   useEffect(() => { setServices(getProviderServices("current")) }, [])
 
-  function selectSetupImage(event: React.ChangeEvent<HTMLInputElement>) {
+  async function selectSetupImage(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
+    event.target.value = ""
     if (!file) return
-    if (!file.type.startsWith("image/")) return setError("Choose a JPG, PNG, or WebP image.")
-    if (file.size > 3 * 1024 * 1024) return setError("Setup image must be 3MB or smaller.")
-    const reader = new FileReader()
-    reader.onload = () => { setImage(String(reader.result)); setError("") }
-    reader.onerror = () => setError("The setup image could not be read.")
-    reader.readAsDataURL(file)
+    setError("")
+    try { setImage(await uploadFile("service-image", file)) } catch (error) { setError((error as Error).message) }
   }
 
   async function addService(event: React.FormEvent<HTMLFormElement>) {
@@ -225,7 +223,7 @@ function ProviderServicesContent({ account, notify }: { account: ClientAccount |
       <div className="rounded-lg border border-primary/25 bg-primary/10 p-4"><p className="text-sm font-medium">Transportation fee outside the covered town/city</p><p className="mt-1 text-sm text-muted-foreground">Nearby out-of-area trips start at ₱1,000. Farther cities and provinces cost more, and the booking form calculates the fee automatically.</p></div>
       <div className="grid gap-2"><Label htmlFor="serviceDescription">Description</Label><textarea id="serviceDescription" name="description" rows={4} required className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50" placeholder="Describe the equipment, setup, and ideal event size." /></div>
       <div className="grid gap-2"><Label htmlFor="servicePrice">Price</Label><Input id="servicePrice" name="price" type="number" min="1" step="1" placeholder="25000" required /></div>
-      <div className="grid gap-2"><Label htmlFor="setupImage">Image of the setup</Label><label htmlFor="setupImage" className="flex cursor-pointer flex-col items-center justify-center overflow-hidden rounded-lg border border-dashed border-border bg-card/50 p-6 text-center hover:border-primary/50">{image ? <img src={image} alt="Setup preview" className="max-h-64 w-full rounded-md object-cover" /> : <><ImagePlus className="text-primary" width={24} /><span className="mt-2 text-sm font-medium">Upload setup image</span><span className="mt-1 text-xs text-muted-foreground">JPG, PNG, or WebP up to 3MB</span></>}<input id="setupImage" type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" onChange={selectSetupImage} /></label></div>
+      <div className="grid gap-2"><Label htmlFor="setupImage">Image of the setup</Label><label htmlFor="setupImage" className="flex cursor-pointer flex-col items-center justify-center overflow-hidden rounded-lg border border-dashed border-border bg-card/50 p-6 text-center hover:border-primary/50">{image ? <img src={publicFileUrl(image)} alt="Setup preview" className="max-h-64 w-full rounded-md object-cover" /> : <><ImagePlus className="text-primary" width={24} /><span className="mt-2 text-sm font-medium">Upload setup image</span><span className="mt-1 text-xs text-muted-foreground">JPG, PNG, or WebP up to 5MB</span></>}<input id="setupImage" type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={selectSetupImage} /></label></div>
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}<Button type="submit" className="w-fit">Publish service</Button>
     </form></CardContent></Card>}
     {services.length ? <Card><CardContent className="p-0"><Table headers={["Service", "Covered town/city", "Transport fee", "Price", "Visibility"]} rows={services.map((service, index) => [<span className="font-medium">{service.name}</span>, service.coverageAreas || service.location, "From ₱1,000", peso(service.price), <button onClick={() => toggleService(index)}><Status>{service.active ? "Active" : "Paused"}</Status></button>])} /></CardContent></Card> : !adding && <Card><CardContent className="py-12 text-center"><p className="font-medium">No services yet</p><p className="mt-1 text-sm text-muted-foreground">Select Add service to publish your first package.</p></CardContent></Card>}
@@ -357,7 +355,7 @@ export function HubWorkspace({ initialPath }: { initialPath: string }) {
   }, [section.kind])
   const providerName = providerAccount?.business || (providerAccount ? `${providerAccount.firstName} ${providerAccount.lastName}` : "Service provider")
   const providerInitials = providerAccount?.profileImage
-    ? <img src={providerAccount.profileImage} alt={`${providerName} logo`} className="h-full w-full object-cover" />
+    ? <img src={publicFileUrl(providerAccount.profileImage)} alt={`${providerName} logo`} className="h-full w-full object-cover" />
     : providerAccount ? `${providerAccount.firstName[0] ?? ""}${providerAccount.lastName[0] ?? ""}`.toUpperCase() : "SP"
   const adminName = adminAccount ? `${adminAccount.firstName} ${adminAccount.lastName}` : "Administrator"
   const adminInitials = adminAccount ? `${adminAccount.firstName[0] ?? ""}${adminAccount.lastName[0] ?? ""}`.toUpperCase() : "AD"

@@ -3,34 +3,25 @@ import { getSupabase } from "./supabase"
 import { normalizePhilippineMobile } from "./phone"
 import { getClerkBrowser, signOutClerk } from "./clerk-browser"
 import { validatePassword } from "./password-policy"
+import { uploadFile } from "./file-upload"
 
 export async function savePendingAccount(account: ClientAccount, password?: string) {
   if (account.role === "admin") throw new Error("Administrator accounts must be assigned by an administrator.")
-  if (account.application) validateProviderDocuments(account.application.documents)
   validatePassword(password ?? "")
   const clerk = await getClerkBrowser()
   if (!clerk.client) throw new Error("Authentication is still loading. Please try again.")
   const email = account.email.trim().toLowerCase()
-  sessionStorage.removeItem("soundstage-pending-documents")
   sessionStorage.setItem("soundstage-oauth-role", account.role)
   sessionStorage.setItem("soundstage-signup-email", email)
   sessionStorage.setItem("soundstage-signup-stage", "email")
   sessionStorage.removeItem("soundstage-signup-delivery-error")
   await clerk.client.signUp.create({ emailAddress: email, password, firstName: account.firstName, lastName: account.lastName,
     unsafeMetadata: { mobile: normalizePhilippineMobile(account.mobile), business: account.business || "" } })
-  if (account.application) sessionStorage.setItem("soundstage-pending-documents", JSON.stringify({ email, documents: account.application.documents }))
   await clerk.client.signUp.prepareEmailAddressVerification({ strategy: "email_code" })
   return false
 }
-export async function finishSignup() {
-  await refreshStore()
-  const documents = sessionStorage.getItem("soundstage-pending-documents")
-  const pending = documents ? JSON.parse(documents) : null
-  if (pending?.email === getAccount()?.email.toLowerCase() && getAccount()?.role === "provider" && !getAccount()?.application) {
-    await submitProviderApplication(pending.documents)
-    sessionStorage.removeItem("soundstage-pending-documents")
-  }
-}
+// Providers upload documents on /provider/application after signing in (P1).
+export async function finishSignup() { await refreshStore() }
 export async function verifyPendingAccount(token: string) {
   if (!/^\d{6}$/.test(token)) return false
   const clerk = await getClerkBrowser()
@@ -200,9 +191,10 @@ export function validateProviderDocuments(documents: ProviderDocument[]) {
   if (!documents.length || documents.length > 4) throw new Error("Upload 1 to 4 documents, including your business permit and valid ID.")
   if (documents.some(doc => !doc.name.trim() || doc.name.length > 200 || !["application/pdf", "image/jpeg", "image/png"].includes(doc.type) || !Number.isInteger(doc.size) || doc.size < 1 || doc.size > 5 * 1024 * 1024 || !doc.key || Object.hasOwn(doc, "data"))) throw new Error("Upload PDF, JPG or PNG documents of up to 5 MB each.")
 }
-export async function readProviderDocuments(files: File[]): Promise<ProviderDocument[]> {
-  if (files.reduce((sum, file) => sum + file.size, 0) > 1024 * 1024) throw new Error("Documents must total 1 MB or less.")
-  const documents = await Promise.all(files.map(file => new Promise<ProviderDocument>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve({ name: file.name, type: file.type, key: String(reader.result), size: file.size }); reader.onerror = () => reject(new Error("Could not read document.")); reader.readAsDataURL(file) })))
+// Every file must upload before anything is submitted; a failure rejects the whole set.
+export async function uploadProviderDocuments(files: File[]): Promise<ProviderDocument[]> {
+  if (!files.length || files.length > 4) throw new Error("Upload 1 to 4 documents, including your business permit and valid ID.")
+  const documents = await Promise.all(files.map(async file => ({ name: file.name, type: file.type, key: await uploadFile("provider-document", file), size: file.size })))
   validateProviderDocuments(documents)
   return documents
 }

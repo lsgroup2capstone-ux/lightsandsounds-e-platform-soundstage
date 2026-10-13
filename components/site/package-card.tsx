@@ -7,6 +7,7 @@ import { MapPin, Sparkles } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { type ServicePackage, formatPeso } from "@/lib/mock-data"
 import { isLoggedIn } from "@/lib/client-auth"
+import { publicFileUrl } from "@/lib/file-upload"
 
 export function PackageCard({ pkg }: { pkg: ServicePackage }) {
   const router = useRouter()
@@ -24,7 +25,7 @@ export function PackageCard({ pkg }: { pkg: ServicePackage }) {
     >
       <div className="relative aspect-[16/10] overflow-hidden">
         <Image
-          src={pkg.image || "/placeholder.svg"}
+          src={publicFileUrl(pkg.image) || "/placeholder.svg"}
           alt={pkg.name}
           fill
           sizes="(max-width: 768px) 100vw, 33vw"

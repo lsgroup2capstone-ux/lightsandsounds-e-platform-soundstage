@@ -17,5 +17,5 @@ lines to `archive/YYYY-MM.md` at the start of each month.
 | [20261009-admin-module](../features/20261009-admin-module/) | spec-approved | - | planner | 2026-10-09 | - |
 | [20261009-feedback-module](../features/20261009-feedback-module/) | spec-approved | - | planner | 2026-10-09 | build step 11 (ADR 0005) |
 | [20261009-notifications](../features/20261009-notifications/) | spec-approved | - | planner | 2026-10-09 | build step 12 (ADR 0005) |
-| [20261012-r2-file-storage](../features/20261012-r2-file-storage/) | in-progress (plan 2 of 4 done) | 3 of 4 | implementer | 2026-10-12 | plan 2 shipped (review-2 round 2 pass; npm test 53/0); do not deploy before plans 3-4 (F3); next /sdd-implement plan-3 |
+| [20261012-r2-file-storage](../features/20261012-r2-file-storage/) | in-progress (plan 3 of 4 done) | 4 of 4 | implementer | 2026-10-13 | plan 3 shipped after review pass; manual R2 checks still outstanding; do not deploy before plan 4; next /sdd-implement plan-4 |
 | <!-- [20260101-example](../features/20260101-example/) --> | <!-- in-progress --> | <!-- 2 of 3 --> | <!-- implementer --> | <!-- 2026-01-02 --> | <!-- types pass, lint pass, test pass, build pass --> |

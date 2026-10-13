@@ -2,37 +2,18 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { useEffect, useState } from "react"
-import { FileText, Loader2, Store, Upload, User } from "lucide-react"
+import { useState } from "react"
+import { Loader2, Store, User } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
-import { loginWithGoogle, savePendingAccount, readProviderDocuments } from "@/lib/client-auth"
+import { loginWithGoogle, savePendingAccount } from "@/lib/client-auth"
 
 import { PasswordInput } from "@/components/auth/password-input"
 import { PASSWORD_REQUIREMENTS, validatePassword } from "@/lib/password-policy"
 
 type Role = "client" | "provider"
-
-function DocumentPreview({ file }: { file: File }) {
-  const [url, setUrl] = useState("")
-  const isImage = ["image/jpeg", "image/png"].includes(file.type)
-  useEffect(() => {
-    if (!isImage) return
-    const previewUrl = URL.createObjectURL(file)
-    setUrl(previewUrl)
-    return () => URL.revokeObjectURL(previewUrl)
-  }, [file, isImage])
-  return <figure className="min-w-0 overflow-hidden rounded-lg border border-border bg-card">
-    {isImage && url ? (
-      // Selected local files use temporary blob URLs for previews.
-      // eslint-disable-next-line @next/next/no-img-element
-      <img src={url} alt={`Preview of ${file.name}`} className="h-40 w-full bg-muted/30 object-contain p-2" />
-    ) : <div className="flex h-40 flex-col items-center justify-center gap-2 text-muted-foreground"><FileText width={32} height={32} /><span className="text-xs">{isImage ? "Loading preview..." : "PDF document"}</span></div>}
-    <figcaption className="break-all border-t border-border p-3 text-xs text-foreground">{file.name}</figcaption>
-  </figure>
-}
 
 const roles: { id: Role; label: string; desc: string; icon: typeof User }[] = [
   { id: "client", label: "Client", desc: "Book lights & sounds for my events", icon: User },
@@ -46,7 +27,6 @@ export function SignupForm({ initialRole = "client", returnTo }: { initialRole?:
   const [role, setRole] = useState<Role>(initialRole)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
-  const [documentFiles, setDocumentFiles] = useState<File[]>([])
 
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -61,10 +41,9 @@ export function SignupForm({ initialRole = "client", returnTo }: { initialRole?:
       e.currentTarget.querySelector<HTMLInputElement>("#confirmation")?.focus()
       throw new Error("Passwords do not match. Please confirm your password again.")
     }
-    const documents = role === "provider" ? await readProviderDocuments(data.getAll("credentials").filter((file): file is File => file instanceof File && file.size > 0)) : undefined
-    const signedIn = await savePendingAccount({ ...(documents ? { application: { status: "Pending" as const, documents, submittedAt: new Date().toISOString() } } : {}), firstName: String(data.get("firstName")), lastName: String(data.get("lastName")), email: String(data.get("email")), mobile: String(data.get("mobile")), role, business: String(data.get("business") || "") || undefined, authMethod: "email" }, String(data.get("password")))
+    const signedIn = await savePendingAccount({ firstName: String(data.get("firstName")), lastName: String(data.get("lastName")), email: String(data.get("email")), mobile: String(data.get("mobile")), role, business: String(data.get("business") || "") || undefined, authMethod: "email" }, String(data.get("password")))
     router.push(signedIn ? (role === "provider" ? "/provider/application" : destination) : `/verify-otp?role=${role}&returnTo=${encodeURIComponent(destination)}`)
-    } catch (err) { setError(err instanceof Error ? err.message : "Account could not be saved. Try smaller documents."); setLoading(false) }
+    } catch (err) { setError(err instanceof Error ? err.message : "Account could not be saved."); setLoading(false) }
   }
 
   async function handleGoogleSignup() {
@@ -90,7 +69,7 @@ export function SignupForm({ initialRole = "client", returnTo }: { initialRole?:
               <button
                 key={r.id}
                 type="button"
-                onClick={() => { if (role !== r.id) setDocumentFiles([]); setRole(r.id) }}
+                onClick={() => setRole(r.id)}
                 aria-pressed={active}
                 className={cn(
                   "flex items-start gap-3 rounded-lg border p-3 text-left transition-all",
@@ -158,19 +137,8 @@ export function SignupForm({ initialRole = "client", returnTo }: { initialRole?:
 
       {role === "provider" && (
         <div className="flex flex-col gap-2">
-          <Label htmlFor="credentials">Business credentials</Label>
-          <label
-            htmlFor="credentials"
-            className="flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-border bg-card/50 px-4 py-6 text-center transition-colors hover:border-primary/50"
-          >
-            <Upload width={20} height={20} className="text-primary" />
-            <span className="text-sm font-medium text-foreground">Upload DTI / permit & valid ID</span>
-            <span className="text-xs text-muted-foreground">PDF, JPG or PNG; up to 4 files, 1 MB total</span>
-            <input id="credentials" name="credentials" type="file" required multiple onChange={event => setDocumentFiles(Array.from(event.target.files || []))} className="sr-only" accept=".pdf,.jpg,.jpeg,.png" />
-          </label>
-          {documentFiles.length > 0 && <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">{documentFiles.map((file, index) => <DocumentPreview key={`${file.name}-${file.lastModified}-${index}`} file={file} />)}</div>}
           <p className="text-xs text-muted-foreground">
-            Your 7-day free trial starts after administrator approval. No automatic charges. Providers are reviewed by our admin team before going live.
+            After signing in, upload your DTI / business permit and valid ID for review. Your 7-day free trial starts after administrator approval. No automatic charges. Providers are reviewed by our admin team before going live.
           </p>
         </div>
       )}

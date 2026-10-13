@@ -6,6 +6,8 @@ import type { ClientAccount } from "@/lib/client-auth"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { publicFileUrl } from "@/lib/file-upload"
+import { Documents } from "./provider-applications"
 
 export function AdminAccounts({ accounts }: { accounts: ClientAccount[] }) {
   const [query, setQuery] = useState("")
@@ -24,11 +26,11 @@ export function AdminAccounts({ accounts }: { accounts: ClientAccount[] }) {
       {visible.map(account => <details key={`${account.role}:${account.email}`} className="rounded-lg border p-4">
         <summary className="cursor-pointer break-words font-medium">{account.firstName} {account.lastName} <span className="text-sm font-normal text-muted-foreground">— {account.role === "provider" ? "Service provider" : "Client"} · {account.email}</span></summary>
         <div className="mt-4 space-y-4">
-          {account.profileImage && <img src={account.profileImage} alt={`${account.firstName}'s profile`} className="h-20 w-20 rounded-full object-cover" />}
+          {account.profileImage && <img src={publicFileUrl(account.profileImage)} alt={`${account.firstName}'s profile`} className="h-20 w-20 rounded-full object-cover" />}
           <dl className="grid gap-4 text-sm sm:grid-cols-2">
             {Object.entries({ "First name": account.firstName, "Last name": account.lastName, "Email address": account.email, "Mobile number": account.mobile, "Account type": account.role === "provider" ? "Service provider" : "Client", "Sign-in method": account.authMethod, "Password": "Hidden for account security", ...(account.role === "provider" ? { "Business name": account.business, "Bio": account.bio, "Application status": account.application?.status || "Not submitted", "Submitted": account.application?.submittedAt, "Reviewed": account.application?.reviewedAt, "Review notes": account.application?.reason } : {}) }).map(([label, value]) => <div key={label}><dt className="text-muted-foreground">{label}</dt><dd className="whitespace-pre-wrap break-words">{value || "Not provided"}</dd></div>)}
           </dl>
-          {account.application && <div className="space-y-2"><p className="text-sm font-medium">Application documents</p>{account.application.documents.map((doc, index) => <a key={index} href={(doc as { data?: string }).data} download={doc.name} className="block break-all text-sm text-primary underline">{doc.name} ({doc.type})</a>)}</div>}
+          {account.application && <div className="space-y-2"><p className="text-sm font-medium">Application documents</p><Documents email={account.email} documents={account.application.documents} /></div>}
           {account.role === "provider" && <Link className="inline-block text-sm text-primary underline" href={`/admin/providers#activity-provider-${account.email}`}>Open provider application</Link>}
         </div>
       </details>)}

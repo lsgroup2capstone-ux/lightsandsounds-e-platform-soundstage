@@ -41,11 +41,10 @@ function fixture(role = 'client') {
   })('lib/client-auth.ts')
   return { auth, api, store, clerk, signIn, signUp, calls, redirects, account }
 }
-test('both roles sign up in Clerk, verify email and retain provider documents', async () => {
+test('both roles sign up in Clerk and verify email; providers submit documents after sign-in', async () => {
   for (const role of ['client', 'provider']) {
     const { auth, calls, account } = fixture(role)
-    const documents = [{ name: 'permit.pdf', type: 'application/pdf', key: 'private/provider-docs/owner/file.pdf', size: 10 }]
-    const profile = { ...account, firstName: 'Test', lastName: 'User', mobile: '09171234567', ...(role === 'provider' ? { application: { documents } } : {}) }
+    const profile = { ...account, firstName: 'Test', lastName: 'User', mobile: '09171234567' }
     await assert.rejects(auth.savePendingAccount({ ...profile, role: 'admin' }, 'Correct-pass1!'), /Administrator/)
     assert.equal(await auth.savePendingAccount(profile, 'Correct-pass1!'), false)
     assert.equal(calls[0][1].emailAddress, account.email)
@@ -59,7 +58,8 @@ test('both roles sign up in Clerk, verify email and retain provider documents', 
     assert.equal(sessionStorage.getItem('soundstage-signup-email'), null)
     assert.ok(calls.some(c => c[0] === 'activate'))
     assert.ok(calls.some(c => c[0] === 'supabase-signout'))
-    if (role === 'provider') assert.deepEqual(calls.find(c => c[0] === 'mutate'), ['mutate', 'submitProviderApplication', [documents]])
+    assert.equal(sessionStorage.getItem('soundstage-pending-documents'), null)
+    assert.equal(calls.some(c => c[0] === 'mutate' && c[1] === 'submitProviderApplication'), false)
   }
 })
 test('Clerk password login returns saved roles and delegates extra verification', async () => {

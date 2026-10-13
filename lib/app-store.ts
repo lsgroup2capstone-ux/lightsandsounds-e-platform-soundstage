@@ -7,7 +7,10 @@ const events = ["account", "services", "bookings", "marketplace", "messages", "r
 let generation = 0
 let queue: Promise<unknown> = Promise.resolve()
 let pendingRefresh: { generation: number; promise: Promise<void> } | undefined
-function apply(payload: { records: Record<string, string>; session: Record<string, string> }) {
+let filesBaseUrl = ""
+export const getFilesBaseUrl = () => filesBaseUrl
+function apply(payload: { records: Record<string, string>; session: Record<string, string>; filesBaseUrl?: string }) {
+  if (typeof payload.filesBaseUrl === "string") filesBaseUrl = payload.filesBaseUrl.replace(/\/+$/, "")
   if (JSON.stringify(appStorage.values) === JSON.stringify(payload.records) && JSON.stringify(sessionView.values) === JSON.stringify(payload.session)) return
   appStorage.values = payload.records
   sessionView.values = payload.session
