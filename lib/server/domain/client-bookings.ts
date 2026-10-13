@@ -61,7 +61,7 @@ export function updateClientBookingStatus(id: string, status: Booking["status"])
         if (booking.status !== "Confirmed") throw new Error("Only confirmed events can be completed.")
       }
       if (booking.status === "Completed") throw new Error("Completed events cannot change status.")
-      updated = { ...booking, status, ...(status === "Completed" ? { completedAt: new Date().toISOString() } : {}), ...(status === "Cancelled" ? { cancelledBy: actor.role, cancelledAt: new Date().toISOString() } : {}) }
+      updated = { ...booking, status, ...(status === "Completed" ? { completedAt: new Date().toISOString() } : {}), ...(status === "Cancelled" ? { cancelledBy: actor.role as Booking["cancelledBy"], cancelledAt: new Date().toISOString() } : {}) }
       recordMarketplaceAction("Booking status changed", id, booking.status, `${status}${status === "Cancelled" ? ` by ${actor.role}` : ""}`)
       return updated
     })

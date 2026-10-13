@@ -173,7 +173,7 @@ export function submitProviderApplication(documents: ProviderDocument[]) { retur
 export function reviewProviderApplication(email: string, status: "Approved" | "Rejected", reason: string) { return mutate("reviewProviderApplication", [email, status, reason]) }
 export type ProviderDocument = { name: string; type: string; key: string; size: number }
 export type ProviderApplication = { status: "Pending" | "Approved" | "Rejected"; documents: ProviderDocument[]; submittedAt: string; reviewedAt?: string; reason?: string }
-export type AccountRole = "client" | "provider" | "admin"
+export type AccountRole = "client" | "provider" | "payroll_master" | "admin"
 export type ClientAccount = { firstName: string; lastName: string; email: string; mobile: string; role: AccountRole; application?: ProviderApplication; business?: string; bio?: string; profileImage?: string; authMethod: "email" | "phone" | "google" }
 const ADMIN_ACCOUNT_KEY = "soundstage-admin-account", SESSION_KEY = "soundstage-session"
 const ACCOUNTS_KEY = "soundstage-accounts-v2"

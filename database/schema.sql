@@ -22,6 +22,21 @@ CREATE TABLE IF NOT EXISTS soundstage.clerk_identities (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE soundstage.clerk_identities ENABLE ROW LEVEL SECURITY;
+CREATE TABLE IF NOT EXISTS soundstage.profiles (
+  clerk_user_id text PRIMARY KEY CHECK (clerk_user_id LIKE 'user_%'),
+  email text NOT NULL UNIQUE CHECK (email = lower(email)),
+  first_name text NOT NULL DEFAULT '',
+  last_name text NOT NULL DEFAULT '',
+  phone text NOT NULL DEFAULT '',
+  role text NOT NULL CHECK (role IN ('client', 'provider', 'payroll_master', 'admin')),
+  status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'deactivated')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE soundstage.profiles ENABLE ROW LEVEL SECURITY;
+INSERT INTO soundstage.profiles (clerk_user_id, email, role, created_at)
+SELECT clerk_id, email, role, created_at FROM soundstage.clerk_identities
+ON CONFLICT DO NOTHING;
 -- Signup OTP state is private to the server; never exposed by the Data API.
 CREATE TABLE IF NOT EXISTS soundstage.signup_phone_verifications (
   auth_id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -53,4 +68,5 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA soundstage REVOKE ALL ON TABLES FROM PUBLIC, 
 INSERT INTO soundstage.schema_versions(version) VALUES (1) ON CONFLICT DO NOTHING;
 INSERT INTO soundstage.schema_versions(version) VALUES (2) ON CONFLICT DO NOTHING;
 INSERT INTO soundstage.schema_versions(version) VALUES (3) ON CONFLICT DO NOTHING;
+INSERT INTO soundstage.schema_versions(version) VALUES (4) ON CONFLICT DO NOTHING;
 COMMIT;

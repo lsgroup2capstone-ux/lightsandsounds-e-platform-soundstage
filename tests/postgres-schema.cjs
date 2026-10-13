@@ -13,7 +13,7 @@ test('PostgreSQL migration is repeatable, preserves records and denies browser r
     await db.exec(schema)
     const result = await db.query('SELECT value FROM soundstage.records WHERE key=$1', ['soundstage-test'])
     assert.equal(result.rows[0].value.nested.amount, 123)
-    assert.equal((await db.query('SELECT count(*)::int AS count FROM soundstage.schema_versions')).rows[0].count, 3)
+    assert.equal((await db.query('SELECT count(*)::int AS count FROM soundstage.schema_versions')).rows[0].count, 4)
     await assert.rejects(db.query('INSERT INTO soundstage.records(key,value) VALUES ($1,$2)', ['invalid', {}]), /check constraint/)
     await assert.rejects(db.query('INSERT INTO soundstage.identities(auth_id,email,role) VALUES ($1,$2,$3)', ['00000000-0000-0000-0000-000000000001', 'a@test.com', 'admin']), /foreign key/)
     await db.exec('SET ROLE anon')
@@ -21,6 +21,7 @@ test('PostgreSQL migration is repeatable, preserves records and denies browser r
     await db.exec('RESET ROLE; SET ROLE authenticated')
     await assert.rejects(db.query('SELECT * FROM soundstage.identities'), /permission denied/)
     await assert.rejects(db.query('SELECT * FROM soundstage.clerk_identities'), /permission denied/)
+    await assert.rejects(db.query('SELECT * FROM soundstage.profiles'), /permission denied/)
     await assert.rejects(db.query('SELECT * FROM soundstage.signup_phone_verifications'), /permission denied/)
     await db.exec('RESET ROLE')
   } finally { await db.close() }

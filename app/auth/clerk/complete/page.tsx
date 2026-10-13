@@ -21,10 +21,11 @@ export default function ClerkComplete() {
     await finishSignup()
     const account = getAccount()
     if (!account) throw new Error("Your account could not be loaded. Please sign in again.")
-    const returnTo = sessionStorage.getItem("soundstage-google-return-to")
-    const destination = returnTo?.startsWith("/") && !returnTo.startsWith("//") && !returnTo.includes("\\") ? returnTo : "/browse"
+    const returnTo = new URLSearchParams(location.search).get("returnTo") || sessionStorage.getItem("soundstage-google-return-to")
     for (const key of ["soundstage-google-return-to", "soundstage-oauth-role", "soundstage-signup-email", "soundstage-signup-stage"]) sessionStorage.removeItem(key)
-    location.replace(account.role === "provider" ? (account.application?.status === "Approved" ? "/provider" : "/provider/application") : destination)
+    location.replace(account.role === "provider" && account.application?.status !== "Approved"
+      ? "/provider/application"
+      : `/dashboard${returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : ""}`)
   })().catch(e => setError(e.message)) }, [])
   return <main className="p-8"><p role={error ? "alert" : "status"}>{error || "Completing sign-in..."}</p>{error && <a href="/login" className="underline">Return to login</a>}</main>
 }

@@ -18,6 +18,7 @@ import { createBackup, previewBackup, restoreBackup } from "./backup"
 import { RequestError } from "./request-error"
 import { KIND_RULES, buildKey, isDataUrl, isFileKind, isOwnKey, type FileKind } from "./file-keys"
 import { deleteObject, headObject, presignGet, presignPut, publicBaseUrl } from "./r2"
+import { ensureProfile } from "./profiles"
 
 export { RequestError }
 const accountsKey = "soundstage-accounts-v2"
@@ -399,31 +400,29 @@ export async function execute(user: AppIdentity | null, action?: string, args: u
     const state = { storage: new MemoryStorage(values), session: new MemoryStorage(), pendingDeletes }
     return context.run(state, async () => {
       if (user) {
-        const isClerk = user.authSource === "clerk"
+        const isClerk = user.authSource === "clerk"; let identity: { email: string; role: string }
         if (isClerk) {
-          const existing = await tx<{ role: string }[]>`select role from soundstage.identities where email = ${user.email!.toLowerCase()}`
-          if (existing[0]?.role === "admin") throw new RequestError("Use your administrator sign-in method for this account.", 403)
-        }
-        const identities = isClerk
-          ? await tx<{ email: string; role: string }[]>`select email, role from soundstage.clerk_identities where clerk_id = ${user.id}`
-          : await tx<{ email: string; role: string }[]>`select email, role from soundstage.identities where auth_id = ${user.id}`
-        let identity = identities[0]
-        if (!identity) {
-          const email = user.email!.toLowerCase()
-          const imported = allAccounts().find(a => a.email.toLowerCase() === email && a.role !== "admin")
-          const role = user.app_metadata.role === "admin" ? "admin" : imported?.role || (user.user_metadata.role === "provider" || signupRole === "provider" ? "provider" : "client")
-          if (isClerk) await tx`insert into soundstage.clerk_identities (clerk_id,email,role) values (${user.id},${email},${role})`
-          else await tx`insert into soundstage.identities (auth_id,email,role) values (${user.id},${email},${role})`
-          identity = { email, role }
-        }
-        if (user.app_metadata.role === "admin" && identity.role !== "admin") {
-          await tx`update soundstage.identities set role='admin' where auth_id=${user.id}`
-          const hasBusinessData = [keyFor(bookingPrefix, identity.email), keyFor(servicePrefix, identity.email)].some(key => JSON.parse(storage.getItem(key) || "[]").length)
-          if (!hasBusinessData) storage.setItem(accountsKey, JSON.stringify(allAccounts().filter(a => a.email.toLowerCase() !== identity.email)))
-          identity = { ...identity, role: "admin" }
+          const existing = await tx<{ role: string }[]>`select role from soundstage.identities where email = ${user.email!.toLowerCase()}`; if (existing[0]?.role === "admin") throw new RequestError("Use your administrator sign-in method for this account.", 403)
+          const profile = await ensureProfile(tx, user, signupRole); if (profile.status !== "active") throw new RequestError(`This account is ${profile.status}.`, 403); identity = { email: profile.email, role: profile.role }
+        } else {
+          const identities = await tx<{ email: string; role: string }[]>`select email, role from soundstage.identities where auth_id = ${user.id}`
+          identity = identities[0]
+          if (!identity) {
+            const email = user.email!.toLowerCase()
+            const imported = allAccounts().find(a => a.email.toLowerCase() === email && a.role !== "admin")
+            const role = user.app_metadata.role === "admin" ? "admin" : imported?.role || (user.user_metadata.role === "provider" || signupRole === "provider" ? "provider" : "client")
+            await tx`insert into soundstage.identities (auth_id,email,role) values (${user.id},${email},${role})`
+            identity = { email, role }
+          }
+          if (user.app_metadata.role === "admin" && identity.role !== "admin") {
+            await tx`update soundstage.identities set role='admin' where auth_id=${user.id}`
+            const hasBusinessData = [keyFor(bookingPrefix, identity.email), keyFor(servicePrefix, identity.email)].some(key => JSON.parse(storage.getItem(key) || "[]").length)
+            if (!hasBusinessData) storage.setItem(accountsKey, JSON.stringify(allAccounts().filter(a => a.email.toLowerCase() !== identity.email)))
+            identity = { ...identity, role: "admin" }
+          }
+          if (identity.role === "admin" && user.app_metadata.role !== "admin") throw new RequestError("Administrator access was revoked.", 403)
         }
         if (identity.email !== user.email!.toLowerCase()) throw new RequestError("Your email changed. Contact support to migrate your account records.", 409)
-        if (identity.role === "admin" && user.app_metadata.role !== "admin") throw new RequestError("Administrator access was revoked.", 403)
         let account = allAccounts().find(a => a.email.toLowerCase() === identity.email && a.role === identity.role)
         if (!account) {
           const m = user.user_metadata
