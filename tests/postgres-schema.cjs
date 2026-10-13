@@ -60,10 +60,13 @@ test('full server workflows persist in PostgreSQL and roll back conflicting writ
     assert.equal(JSON.parse(googleState.session['soundstage-session']).role, 'provider')
     assert.equal(JSON.parse(googleState.records['soundstage-accounts-v2']).find(a => a.email === provider.email).application.status, 'Pending')
     await assert.rejects(execute({ ...google, email: 'changed@test.com' }), /email changed/)
-    await assert.rejects(execute({ ...google, id: 'user_admin_attempt', email: admin.email }), /administrator sign-in/)
+    await db.query('INSERT INTO soundstage.profiles(clerk_user_id,email,role) VALUES ($1,$2,$3)', ['user_admin_attempt', admin.email, 'admin'])
+    const clerkAdmin = { ...google, id: 'user_admin_attempt', email: admin.email }
+    const migratedAdmin = await execute(clerkAdmin)
+    assert.equal(JSON.parse(migratedAdmin.session['soundstage-session']).role, 'admin')
     await assert.rejects(execute(client, 'reviewProviderApplication', [provider.email, 'Approved', '']), /permission/)
-    await execute(admin, 'reviewProviderApplication', [provider.email, 'Approved', 'Checked'])
-    await execute(provider, 'saveProviderService', [{ id: 'service-1', name: 'Lights', location: 'Balayan', price: 1000, active: true }])
+    await execute(clerkAdmin, 'reviewProviderApplication', [provider.email, 'Approved', 'Checked'])
+    await execute(google, 'saveProviderService', [{ id: 'service-1', name: 'Lights', location: 'Balayan', price: 1000, active: true }])
     const publicState = await execute(null)
     assert.ok(publicState.records['soundstage-provider-services-v2:provider%40test.com'])
     assert.equal(JSON.stringify(publicState).includes('JVBERi0='), false)
@@ -84,21 +87,21 @@ test('full server workflows persist in PostgreSQL and roll back conflicting writ
     await execute(outsider, 'verifyPayment', [otherBooking.id])
     assert.deepEqual((await execute(client, 'getBookingAvailability', ['service-1'])).result, [])
     const accepted = await Promise.allSettled([
-      execute(provider, 'updateClientBookingStatus', [winner.id, 'Confirmed']),
-      execute(provider, 'updateClientBookingStatus', [otherBooking.id, 'Confirmed']),
+      execute(google, 'updateClientBookingStatus', [winner.id, 'Confirmed']),
+      execute(google, 'updateClientBookingStatus', [otherBooking.id, 'Confirmed']),
     ])
     assert.equal(accepted[0].status, 'fulfilled')
     assert.equal(accepted[1].status, 'rejected')
     assert.match(accepted[1].reason.message, /already accepted/)
     assert.deepEqual((await execute(client, 'getBookingAvailability', ['service-1'])).result, ['2027-01-02'])
-    await execute(provider, 'updateClientBookingStatus', [winner.id, 'Completed'])
+    await execute(google, 'updateClientBookingStatus', [winner.id, 'Completed'])
     await execute(client, 'submitEventFeedback', [winner.id, 5, 'Excellent'])
-    const finalState = await execute(admin)
+    const finalState = await execute(clerkAdmin)
     const finalBooking = JSON.parse(finalState.records['soundstage-client-bookings-v3:client%40test.com'])[0]
     assert.equal(finalBooking.status, 'Completed')
     assert.equal(finalBooking.feedback.rating, 5)
     await assert.rejects(execute(null, 'saveProviderService', [{}]), /Sign in/)
-    await assert.rejects(execute(admin, 'constructor', []), /Unknown operation/)
+    await assert.rejects(execute(clerkAdmin, 'constructor', []), /Unknown operation/)
     // Editable signup metadata must not grant administrator access.
     const hostile = { ...outsider, user_metadata: { ...outsider.user_metadata, role: 'admin' } }
     assert.equal(JSON.parse((await execute(hostile)).session['soundstage-session']).role, 'client')

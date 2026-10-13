@@ -402,7 +402,6 @@ export async function execute(user: AppIdentity | null, action?: string, args: u
       if (user) {
         const isClerk = user.authSource === "clerk"; let identity: { email: string; role: string }
         if (isClerk) {
-          const existing = await tx<{ role: string }[]>`select role from soundstage.identities where email = ${user.email!.toLowerCase()}`; if (existing[0]?.role === "admin") throw new RequestError("Use your administrator sign-in method for this account.", 403)
           const profile = await ensureProfile(tx, user, signupRole); if (profile.status !== "active") throw new RequestError(`This account is ${profile.status}.`, 403); identity = { email: profile.email, role: profile.role }
         } else {
           const identities = await tx<{ email: string; role: string }[]>`select email, role from soundstage.identities where auth_id = ${user.id}`
@@ -414,6 +413,8 @@ export async function execute(user: AppIdentity | null, action?: string, args: u
             await tx`insert into soundstage.identities (auth_id,email,role) values (${user.id},${email},${role})`
             identity = { email, role }
           }
+          const migrated = await tx`select 1 from soundstage.profiles where email=${identity.email}`
+          if (migrated.length) throw new RequestError("Your account now signs in with the new sign-in. Use Forgot password to set your password.", 403)
           if (user.app_metadata.role === "admin" && identity.role !== "admin") {
             await tx`update soundstage.identities set role='admin' where auth_id=${user.id}`
             const hasBusinessData = [keyFor(bookingPrefix, identity.email), keyFor(servicePrefix, identity.email)].some(key => JSON.parse(storage.getItem(key) || "[]").length)

@@ -79,3 +79,20 @@ test('a profile email conflict is denied instead of merging Clerk identities', a
     assert.equal((await db.query("SELECT count(*)::int AS count FROM soundstage.profiles WHERE email='same@example.com'")).rows[0].count, 1)
   } finally { await db.close() }
 })
+
+test('migrated Supabase sessions are denied and former Supabase admins can use Clerk', async () => {
+  const { db, execute } = await setup()
+  try {
+    const authId = '00000000-0000-0000-0000-000000000090'
+    const email = 'migrated-admin@example.com'
+    await db.query('INSERT INTO auth.users(id) VALUES ($1)', [authId])
+    await db.query('INSERT INTO soundstage.identities(auth_id,email,role) VALUES ($1,$2,$3)', [authId, email, 'admin'])
+    await db.query('INSERT INTO soundstage.profiles(clerk_user_id,email,role) VALUES ($1,$2,$3)', ['user_migrated_admin', email, 'admin'])
+    const supabaseUser = { id: authId, email, email_confirmed_at: '2026-01-01', app_metadata: { role: 'admin' }, user_metadata: {} }
+    await assert.rejects(execute(supabaseUser), error => error.status === 403 && /new sign-in/.test(error.message))
+
+    const clerkUser = identity('user_migrated_admin', email)
+    const response = await execute(clerkUser)
+    assert.equal(JSON.parse(response.session['soundstage-session']).role, 'admin')
+  } finally { await db.close() }
+})
