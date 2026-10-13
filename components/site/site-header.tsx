@@ -4,6 +4,7 @@ import Link from "next/link"
 import { useEffect, useState } from "react"
 import { UserRound } from "lucide-react"
 import { Logo } from "@/components/site/logo"
+import { ThemeToggle } from "@/components/site/theme-toggle"
 import { Button } from "@/components/ui/button"
 import { isLoggedIn } from "@/lib/client-auth"
 
@@ -40,6 +41,7 @@ export function SiteHeader() {
           ))}
         </nav>
         <div className="flex items-center gap-2">
+          <ThemeToggle />
           {signedIn ? (
             <Button asChild size="sm" className="glow-primary">
               <Link href="/dashboard"><UserRound width={16} height={16} /> Client profile</Link>
