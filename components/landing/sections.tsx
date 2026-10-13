@@ -38,23 +38,23 @@ const steps = [
 
 export function HowItWorks() {
   return (
-    <section id="how-it-works" className="mx-auto max-w-6xl scroll-mt-20 px-4 py-20 sm:px-6">
+    <section id="how-it-works" className="mx-auto max-w-6xl scroll-mt-20 px-4 py-24 sm:px-6">
       <div className="max-w-2xl">
-        <p className="text-sm font-semibold uppercase tracking-wider text-primary">How it works</p>
-        <h2 className="mt-2 font-display text-3xl font-bold tracking-tight text-foreground text-balance sm:text-4xl">
+        <p className="text-base font-semibold text-primary">How it works</p>
+        <h2 className="mt-2 text-4xl font-semibold tracking-tight text-foreground text-balance sm:text-5xl">
           From booking to beat drop in four steps
         </h2>
       </div>
       <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
         {steps.map((step, i) => (
-          <Card key={step.title} className="border-border/70 bg-card p-6">
+          <Card key={step.title} className="p-6">
             <div className="flex items-center justify-between">
-              <span className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <span className="flex h-11 w-11 items-center justify-center rounded-full bg-primary/10 text-primary">
                 <step.icon width={22} height={22} />
               </span>
-              <span className="font-display text-sm font-semibold text-muted-foreground/50">0{i + 1}</span>
+              <span className="text-sm font-semibold text-muted-foreground/60">0{i + 1}</span>
             </div>
-            <h3 className="mt-4 font-display text-lg font-semibold text-foreground">{step.title}</h3>
+            <h3 className="mt-4 text-lg font-semibold text-foreground">{step.title}</h3>
             <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{step.body}</p>
           </Card>
         ))}
@@ -69,12 +69,12 @@ export function FeaturedPackages() {
     <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
       <div className="flex items-end justify-between gap-4">
         <div className="max-w-2xl">
-          <p className="text-sm font-semibold uppercase tracking-wider text-accent">Featured packages</p>
-          <h2 className="mt-2 font-display text-3xl font-bold tracking-tight text-foreground text-balance sm:text-4xl">
+          <p className="text-base font-semibold text-primary">Featured packages</p>
+          <h2 className="mt-2 text-4xl font-semibold tracking-tight text-foreground text-balance sm:text-5xl">
             Popular setups this season
           </h2>
         </div>
-        <Button asChild variant="ghost" className="hidden shrink-0 text-primary hover:text-primary/80 sm:inline-flex">
+        <Button asChild variant="link" className="hidden shrink-0 sm:inline-flex">
           <Link href="/browse">View all</Link>
         </Button>
       </div>
@@ -84,7 +84,7 @@ export function FeaturedPackages() {
         ))}
       </div>
       <div className="mt-6 sm:hidden">
-        <Button asChild variant="outline" className="w-full border-border/70">
+        <Button asChild variant="outline" className="w-full">
           <Link href="/browse">View all packages</Link>
         </Button>
       </div>
@@ -99,11 +99,11 @@ export function Coverage() {
     { name: "Lian", detail: "Resorts, halls & private estates" },
   ]
   return (
-    <section id="coverage" className="scroll-mt-20 border-y border-border/60 bg-card/40">
-      <div className="mx-auto grid max-w-6xl items-center gap-10 px-4 py-20 sm:px-6 lg:grid-cols-2">
+    <section id="coverage" className="scroll-mt-20 bg-card">
+      <div className="mx-auto grid max-w-6xl items-center gap-12 px-4 py-24 sm:px-6 lg:grid-cols-2">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-wider text-primary">Coverage</p>
-          <h2 className="mt-2 font-display text-3xl font-bold tracking-tight text-foreground text-balance sm:text-4xl">
+          <p className="text-base font-semibold text-primary">Coverage</p>
+          <h2 className="mt-2 text-4xl font-semibold tracking-tight text-foreground text-balance sm:text-5xl">
             Built for western Batangas
           </h2>
           <p className="mt-4 max-w-md leading-relaxed text-muted-foreground">
@@ -112,7 +112,7 @@ export function Coverage() {
           </p>
           <div className="mt-6 space-y-3">
             {areas.map((a) => (
-              <div key={a.name} className="flex items-start gap-3 rounded-lg border border-border/70 bg-background/60 p-4">
+              <div key={a.name} className="flex items-start gap-3 rounded-lg bg-muted/60 p-4">
                 <MapPinned width={20} height={20} className="mt-0.5 shrink-0 text-primary" />
                 <div>
                   <p className="font-medium text-foreground">{a.name}</p>
@@ -122,9 +122,9 @@ export function Coverage() {
             ))}
           </div>
         </div>
-        <Card className="relative overflow-hidden border-border/70 bg-background/60 p-2">
-          <div className="relative flex aspect-[4/3] items-center justify-center overflow-hidden rounded-lg bg-[radial-gradient(circle_at_30%_20%,rgba(0,229,255,0.15),transparent_45%),radial-gradient(circle_at_75%_70%,rgba(176,38,255,0.15),transparent_45%)]">
-            <div className="absolute inset-0 opacity-[0.06] [background-image:linear-gradient(to_right,#f5f5f5_1px,transparent_1px),linear-gradient(to_bottom,#f5f5f5_1px,transparent_1px)] [background-size:32px_32px]" />
+        <Card className="relative overflow-hidden bg-background p-2">
+          <div className="relative flex aspect-[4/3] items-center justify-center overflow-hidden rounded-md bg-muted/50">
+            <div className="absolute inset-0 opacity-[0.07] [background-image:linear-gradient(to_right,var(--foreground)_1px,transparent_1px),linear-gradient(to_bottom,var(--foreground)_1px,transparent_1px)] [background-size:32px_32px]" />
             {[
               { top: "34%", left: "28%", label: "Balayan" },
               { top: "58%", left: "52%", label: "Nasugbu" },
@@ -132,10 +132,10 @@ export function Coverage() {
             ].map((pin) => (
               <div key={pin.label} className="absolute flex flex-col items-center" style={{ top: pin.top, left: pin.left }}>
                 <span className="relative flex h-3 w-3">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/60" />
+                  <span className="absolute inline-flex h-full w-full motion-safe:animate-ping rounded-full bg-primary/60" />
                   <span className="relative inline-flex h-3 w-3 rounded-full bg-primary" />
                 </span>
-                <span className="mt-1.5 rounded bg-background/80 px-1.5 py-0.5 text-[11px] font-medium text-foreground backdrop-blur">
+                <span className="mt-1.5 rounded-full bg-card/90 px-2 py-0.5 text-[11px] font-medium text-foreground shadow-soft backdrop-blur">
                   {pin.label}
                 </span>
               </div>
@@ -154,28 +154,27 @@ export function ProviderCta() {
     { icon: Store, title: "Simple subscriptions", body: "Flexible monthly or yearly plans — no hidden fees." },
   ]
   return (
-    <section id="providers" className="scroll-mt-20 border-t border-border/60 bg-card/40">
+    <section id="providers" className="scroll-mt-20">
       <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
-        <div className="relative overflow-hidden rounded-2xl border border-accent/30 bg-background p-8 sm:p-12">
-          <div className="absolute inset-0 -z-10 bg-[radial-gradient(70%_120%_at_100%_0%,rgba(176,38,255,0.16),transparent_60%)]" />
+        <div className="relative overflow-hidden rounded-xl bg-card p-8 shadow-soft sm:p-14">
           <div className="grid gap-10 lg:grid-cols-2 lg:items-center">
             <div>
-              <p className="text-sm font-semibold uppercase tracking-wider text-accent">For providers</p>
-              <h2 className="mt-2 font-display text-3xl font-bold tracking-tight text-foreground text-balance sm:text-4xl">
+              <p className="text-base font-semibold text-primary">For providers</p>
+              <h2 className="mt-2 text-4xl font-semibold tracking-tight text-foreground text-balance sm:text-5xl">
                 Run your lights &amp; sounds business the modern way
               </h2>
               <p className="mt-4 max-w-md leading-relaxed text-muted-foreground">
                 List your packages, control your calendar, and get paid on time. Join the growing network of local
                 providers on SoundStage.
               </p>
-              <Button asChild size="lg" className="glow-accent mt-6 bg-accent text-accent-foreground hover:bg-accent/90">
+              <Button asChild size="lg" className="mt-8">
                 <Link href="/signup?role=provider">Apply as a provider</Link>
               </Button>
             </div>
             <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-1">
               {perks.map((p) => (
-                <div key={p.title} className="flex items-start gap-3 rounded-lg border border-border/70 bg-card/60 p-4">
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-accent/15 text-accent">
+                <div key={p.title} className="flex items-start gap-3 rounded-lg bg-muted/60 p-4">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
                     <p.icon width={20} height={20} />
                   </span>
                   <div>

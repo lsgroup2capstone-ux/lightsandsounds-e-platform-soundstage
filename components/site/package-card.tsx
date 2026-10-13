@@ -21,7 +21,7 @@ export function PackageCard({ pkg }: { pkg: ServicePackage }) {
         event.preventDefault()
         router.push(`/login?returnTo=${encodeURIComponent(packageHref)}`)
       }}
-      className="group flex flex-col overflow-hidden rounded-xl border border-border/70 bg-card transition-all hover:border-primary/40 hover:shadow-[0_12px_48px_-16px_rgba(0,229,255,0.35)]"
+      className="group flex flex-col overflow-hidden rounded-lg bg-card shadow-soft ring-1 ring-foreground/5 transition-[transform,box-shadow] duration-300 motion-safe:hover:-translate-y-0.5 hover:shadow-lg"
     >
       <div className="relative aspect-[16/10] overflow-hidden">
         <Image
@@ -31,22 +31,21 @@ export function PackageCard({ pkg }: { pkg: ServicePackage }) {
           sizes="(max-width: 768px) 100vw, 33vw"
           className="object-cover transition-transform duration-500 group-hover:scale-105"
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-card via-card/10 to-transparent" />
         <div className="absolute left-3 top-3 flex gap-2">
-          <Badge variant="secondary" className="border-border/60 bg-background/70 text-foreground backdrop-blur">
+          <Badge variant="secondary" className="bg-card/85 text-foreground shadow-soft backdrop-blur">
             {pkg.category}
           </Badge>
           {pkg.premium && (
-            <Badge className="gap-1 border-accent/40 bg-accent/20 text-accent">
+            <Badge className="gap-1 bg-foreground text-background">
               <Sparkles width={12} height={12} />
               Premium
             </Badge>
           )}
         </div>
       </div>
-      <div className="flex flex-1 flex-col gap-3 p-4">
+      <div className="flex flex-1 flex-col gap-3 p-5">
         <div className="flex items-start justify-between gap-2">
-          <h3 className="font-display text-base font-semibold leading-tight text-foreground text-balance">
+          <h3 className="text-lg font-semibold leading-tight tracking-tight text-foreground text-balance">
             {pkg.name}
           </h3>
         </div>
@@ -60,7 +59,7 @@ export function PackageCard({ pkg }: { pkg: ServicePackage }) {
         <div className="mt-auto flex items-end justify-between border-t border-border/60 pt-3">
           <div>
             <p className="text-xs text-muted-foreground">Starting at</p>
-            <p className="font-display text-lg font-bold text-foreground">{formatPeso(pkg.price)}</p>
+            <p className="text-lg font-semibold text-foreground">{formatPeso(pkg.price)}</p>
           </div>
           <span className="text-sm font-medium text-primary transition-colors group-hover:text-primary/80">
             View details

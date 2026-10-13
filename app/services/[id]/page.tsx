@@ -47,7 +47,7 @@ export default async function ServiceDetailPage({ params }: { params: Promise<{ 
         <div className="mx-auto grid w-full max-w-6xl gap-8 px-4 pb-16 md:px-6 lg:grid-cols-[1fr_360px]">
           {/* Main */}
           <div>
-            <div className="relative aspect-[16/9] overflow-hidden rounded-2xl border border-border">
+            <div className="relative aspect-[16/9] overflow-hidden rounded-xl shadow-soft">
               <Image
                 src={pkg.image || "/placeholder.svg"}
                 alt={pkg.name}
@@ -57,11 +57,11 @@ export default async function ServiceDetailPage({ params }: { params: Promise<{ 
                 className="object-cover"
               />
               <div className="absolute left-4 top-4 flex gap-2">
-                <Badge variant="secondary" className="border-border/60 bg-background/70 text-foreground backdrop-blur">
+                <Badge variant="secondary" className="bg-card/85 text-foreground shadow-soft backdrop-blur">
                   {pkg.category}
                 </Badge>
                 {pkg.premium && (
-                  <Badge className="gap-1 border-accent/40 bg-accent/20 text-accent">
+                  <Badge className="gap-1 bg-foreground text-background">
                     <Sparkles width={12} height={12} />
                     Premium
                   </Badge>
@@ -105,9 +105,9 @@ export default async function ServiceDetailPage({ params }: { params: Promise<{ 
             {/* Provider */}
             <section>
               <h2 className="font-sans text-xl font-semibold">About the provider</h2>
-              <div className="mt-4 rounded-xl border border-border bg-card/50 p-5">
+              <div className="mt-4 rounded-lg bg-card p-5 shadow-soft">
                 <div className="flex items-center gap-3">
-                  <span className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/15 font-display text-lg font-bold text-primary">
+                  <span className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-lg font-semibold text-primary">
                     {pkg.provider.name.charAt(0)}
                   </span>
                   <div>
@@ -128,7 +128,7 @@ export default async function ServiceDetailPage({ params }: { params: Promise<{ 
 
           {/* Booking sidebar */}
           <aside className="lg:sticky lg:top-20 lg:self-start">
-            <div className="rounded-2xl border border-border bg-card p-6">
+            <div className="rounded-xl bg-card p-6 shadow-soft">
               <p className="text-sm text-muted-foreground">Package price</p>
               <p className="font-sans text-3xl font-bold text-foreground">{formatPeso(pkg.price)}</p>
               <p className="mt-1 text-xs text-muted-foreground">
@@ -165,7 +165,7 @@ export default async function ServiceDetailPage({ params }: { params: Promise<{ 
 
         {/* Related */}
         {related.length > 0 && (
-          <section className="border-t border-border/60 bg-card/20">
+          <section className="bg-card">
             <div className="mx-auto w-full max-w-6xl px-4 py-12 md:px-6">
               <h2 className="font-sans text-xl font-semibold">Similar packages</h2>
               <div className="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
@@ -173,15 +173,15 @@ export default async function ServiceDetailPage({ params }: { params: Promise<{ 
                   <Link
                     key={r.id}
                     href={`/services/${r.id}`}
-                    className="group flex gap-3 rounded-xl border border-border/70 bg-card p-3 transition-colors hover:border-primary/40"
+                    className="group flex gap-3 rounded-lg bg-background p-3 transition-shadow hover:shadow-soft"
                   >
-                    <div className="relative h-20 w-24 shrink-0 overflow-hidden rounded-lg">
+                    <div className="relative h-20 w-24 shrink-0 overflow-hidden rounded-md">
                       <Image src={r.image || "/placeholder.svg"} alt={r.name} fill sizes="96px" className="object-cover" />
                     </div>
                     <div className="flex flex-col justify-center">
                       <p className="text-sm font-medium leading-tight text-foreground">{r.name}</p>
                       <p className="mt-1 text-xs text-muted-foreground">{r.location}</p>
-                      <p className="mt-1 font-display text-sm font-semibold text-foreground">{formatPeso(r.price)}</p>
+                      <p className="mt-1 text-sm font-semibold text-foreground">{formatPeso(r.price)}</p>
                     </div>
                   </Link>
                 ))}

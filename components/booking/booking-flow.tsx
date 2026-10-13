@@ -182,7 +182,7 @@ export function BookingFlow({ pkg, trigger }: { pkg: ServicePackage; trigger: Re
       <DialogTrigger render={trigger} />
       <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle className="font-display text-xl">
+          <DialogTitle className="text-xl font-semibold tracking-tight">
             {step === 4 ? "Booking confirmed" : `Book ${pkg.name}`}
           </DialogTitle>
         </DialogHeader>
@@ -288,7 +288,7 @@ export function BookingFlow({ pkg, trigger }: { pkg: ServicePackage; trigger: Re
         {/* Step 2: Review */}
         {step === 2 && (
           <div className="flex flex-col gap-4">
-            <div className="rounded-lg border border-border bg-card/50 p-4">
+            <div className="rounded-lg bg-muted/60 p-4">
               <p className="font-semibold text-foreground">{pkg.name}</p>
               <p className="text-sm text-muted-foreground">{pkg.provider.name}</p>
               <div className="mt-3 flex flex-col gap-2 text-sm">
@@ -300,7 +300,7 @@ export function BookingFlow({ pkg, trigger }: { pkg: ServicePackage; trigger: Re
                 <Row icon={<Users width={15} height={15} />} label={`${guests} guests`} />
               </div>
             </div>
-            <div className="flex flex-col gap-2 rounded-lg border border-border p-4 text-sm">
+            <div className="flex flex-col gap-2 rounded-lg bg-muted/60 p-4 text-sm">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Base service price</span>
                 <span className="font-medium text-foreground">{formatPeso(pkg.price)}</span>
@@ -318,7 +318,7 @@ export function BookingFlow({ pkg, trigger }: { pkg: ServicePackage; trigger: Re
               </div>
             </div>
             <div className="flex gap-2">
-              <Button variant="outline" className="flex-1 border-border" onClick={() => setStep(1)}>
+              <Button variant="outline" className="flex-1" onClick={() => setStep(1)}>
                 Back
               </Button>
               <Button className="flex-1" onClick={() => setStep(3)}>
@@ -331,9 +331,9 @@ export function BookingFlow({ pkg, trigger }: { pkg: ServicePackage; trigger: Re
         {/* Step 3: Downpayment */}
         {step === 3 && (
           <div className="flex flex-col gap-4">
-            <div className="rounded-lg border border-primary/30 bg-primary/10 p-4">
+            <div className="rounded-lg bg-primary/10 p-4">
               <p className="text-sm text-muted-foreground">Downpayment due now</p>
-              <p className="font-display text-3xl font-bold text-foreground">{formatPeso(downpayment)}</p>
+              <p className="text-4xl font-semibold tracking-tight text-foreground">{formatPeso(downpayment)}</p>
               <p className="mt-1 text-xs text-muted-foreground">
                 Your date is reserved after provider acceptance. Balance of {formatPeso(balance)} is paid on the event day.
               </p>
@@ -342,7 +342,7 @@ export function BookingFlow({ pkg, trigger }: { pkg: ServicePackage; trigger: Re
             <p className="text-xs text-muted-foreground">PayMongo opens in a new tab. Complete your payment there.</p>
             {checkoutUrl && <p role="status" className="text-sm">Checkout is ready. <a href={checkoutUrl} target="_blank" rel="noopener noreferrer" className="text-primary underline">Open payment tab</a></p>}
             <div className="flex gap-2">
-              <Button variant="outline" className="flex-1 border-border" onClick={() => setStep(2)}>
+              <Button variant="outline" className="flex-1" onClick={() => setStep(2)}>
                 Back
               </Button>
               <Button className="flex-1" disabled={saving || Boolean(checkoutUrl)} onClick={completePayment}>
@@ -360,13 +360,13 @@ export function BookingFlow({ pkg, trigger }: { pkg: ServicePackage; trigger: Re
               <Check width={32} height={32} />
             </span>
             <div>
-              <p className="font-display text-xl font-semibold text-foreground">You&apos;re all set!</p>
+              <p className="text-2xl font-semibold tracking-tight text-foreground">You&apos;re all set!</p>
               <p className="mt-1 text-sm text-muted-foreground">
                 Your booking request for {pkg.name} has been sent to {pkg.provider.name}. You&apos;ll get an update once
                 they confirm.
               </p>
             </div>
-            <div className="w-full rounded-lg border border-border bg-card/50 p-3 text-left text-sm">
+            <div className="w-full rounded-lg bg-muted/60 p-3 text-left text-sm">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Reference</span>
                 <span className="font-mono text-foreground">{reference}</span>
@@ -378,7 +378,7 @@ export function BookingFlow({ pkg, trigger }: { pkg: ServicePackage; trigger: Re
             </div>
             {completedBooking && <div className="w-full text-left"><PaymentReceiptCard booking={completedBooking} /></div>}
             <div className="flex w-full gap-2">
-              <Button variant="outline" className="flex-1 border-border" onClick={() => handleOpenChange(false)}>
+              <Button variant="outline" className="flex-1" onClick={() => handleOpenChange(false)}>
                 Close
               </Button>
               <Button

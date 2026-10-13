@@ -33,25 +33,25 @@ const columns = [
 
 export function SiteFooter() {
   return (
-    <footer className="border-t border-border/60 bg-card/40">
+    <footer className="border-t border-border/60 bg-muted/60">
       <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
         <div className="grid gap-10 md:grid-cols-[1.4fr_1fr_1fr_1fr]">
           <div className="max-w-xs">
             <Logo />
-            <p className="mt-4 text-sm leading-relaxed text-muted-foreground">
+            <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
               The centralized booking platform for lights and sounds providers across Balayan, Nasugbu, and Lian,
               Batangas.
             </p>
           </div>
           {columns.map((col) => (
             <div key={col.title}>
-              <h4 className="text-sm font-semibold text-foreground">{col.title}</h4>
-              <ul className="mt-4 space-y-3">
+              <h4 className="text-xs font-semibold text-foreground">{col.title}</h4>
+              <ul className="mt-3 space-y-2">
                 {col.links.map((link) => (
                   <li key={link.label}>
                     <Link
                       href={link.href}
-                      className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+                      className="text-xs text-muted-foreground transition-colors hover:text-foreground hover:underline"
                     >
                       {link.label}
                     </Link>

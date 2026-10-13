@@ -25,5 +25,5 @@ export default function PaymentReturn() {
     finally { setBusy(false) }
   }
   useEffect(() => { void verify() }, [])
-  return <main className="mx-auto max-w-xl space-y-6 px-6 py-20"><h1 className="text-3xl font-bold">PayMongo payment</h1><p role="status">{message}</p><div className="flex flex-wrap gap-3">{!paid && <Button disabled={busy} onClick={() => void verify()}>{busy ? "Checking…" : "Check payment"}</Button>}{checkoutUrl && <Button disabled={busy} variant="outline" onClick={() => void verify(true)}>Cancel checkout</Button>}{checkoutUrl && <Button asChild><a href={checkoutUrl}>Resume checkout</a></Button>}<Button asChild variant="outline"><Link href={destination}>Back to account</Link></Button></div></main>
+  return <main className="mx-auto max-w-xl space-y-6 px-6 py-20"><h1 className="text-4xl font-semibold tracking-tight">PayMongo payment</h1><p role="status">{message}</p><div className="flex flex-wrap gap-3">{!paid && <Button disabled={busy} onClick={() => void verify()}>{busy ? "Checking…" : "Check payment"}</Button>}{checkoutUrl && <Button disabled={busy} variant="outline" onClick={() => void verify(true)}>Cancel checkout</Button>}{checkoutUrl && <Button asChild><a href={checkoutUrl}>Resume checkout</a></Button>}<Button asChild variant="outline"><Link href={destination}>Back to account</Link></Button></div></main>
 }

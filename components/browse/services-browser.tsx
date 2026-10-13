@@ -175,7 +175,7 @@ export function ServicesBrowser() {
               ))}
             </div>
           ) : (
-            <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card/40 py-20 text-center">
+            <div className="flex flex-col items-center justify-center rounded-lg bg-card py-20 shadow-soft text-center">
               <span className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
                 <Search width={22} height={22} />
               </span>

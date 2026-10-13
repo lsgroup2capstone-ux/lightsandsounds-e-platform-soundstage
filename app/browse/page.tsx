@@ -13,10 +13,10 @@ export default function BrowsePage() {
     <div className="flex min-h-dvh flex-col">
       <SiteHeader />
       <main className="flex-1">
-        <div className="border-b border-border/60 bg-card/30">
-          <div className="mx-auto w-full max-w-6xl px-4 py-10 md:px-6 md:py-14">
-            <p className="font-mono text-xs uppercase tracking-[0.2em] text-primary">Service marketplace</p>
-            <h1 className="mt-3 text-balance font-sans text-3xl font-bold tracking-tight md:text-4xl">
+        <div className="bg-card">
+          <div className="mx-auto w-full max-w-6xl px-4 py-12 md:px-6 md:py-16">
+            <p className="text-base font-semibold text-primary">Service marketplace</p>
+            <h1 className="mt-2 text-balance text-4xl font-semibold tracking-tight md:text-5xl">
               Find the right rig for your event
             </h1>
             <p className="mt-3 max-w-2xl text-pretty leading-relaxed text-muted-foreground">

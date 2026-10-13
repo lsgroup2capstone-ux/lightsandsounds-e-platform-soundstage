@@ -12,7 +12,7 @@ risk: standard
 - Feature: `.agents/features/20261013-apple-design-ui/spec.md`
 - Design: none
 - Implements decisions: D2, D4, D5, D6
-- Spec revision: 1
+- Spec revision: 2
 - Depends on: plans 1–3
 - Status: plan-approved
 - Estimate: about 200 lines of diff

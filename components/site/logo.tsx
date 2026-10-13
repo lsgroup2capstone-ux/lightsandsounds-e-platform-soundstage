@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils"
 export function Logo({ className, href = "/browse", linked = true }: { className?: string; href?: string; linked?: boolean }) {
   const content = (
     <>
-      <span className="relative flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+      <span className="relative flex h-8 w-8 items-center justify-center rounded-[9px] bg-foreground text-background">
         <svg
           width="20"
           height="20"
@@ -22,8 +22,8 @@ export function Logo({ className, href = "/browse", linked = true }: { className
           <path d="M20 10v4" />
         </svg>
       </span>
-      <span className="font-display text-lg font-bold tracking-tight text-foreground">
-        Sound<span className="text-primary">Stage</span>
+      <span className="text-lg font-semibold tracking-tight text-foreground">
+        SoundStage
       </span>
     </>
   )
