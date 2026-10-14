@@ -2,7 +2,7 @@
 artifact: spec
 schema: 1
 feature: 20261009-payroll-master
-revision: 4
+revision: 6
 status: spec-approved
 risk: high-risk
 ---
@@ -10,10 +10,10 @@ risk: high-risk
 # Payroll master module
 
 - Feature id: 20261009-payroll-master
-- Revision: 4
+- Revision: 6
 - Status: spec-approved
 - Risk lane: high-risk
-- Approved by: user, 2026-10-09
+- Approved by: user, 2026-10-14 (rev 6)
 - Related decisions: .agents/decisions/0002-bookings-relational-source.md, .agents/decisions/0003-payments-webhook-only.md, .agents/decisions/0004-financial-records-and-audit.md (all proposed)
 - Depends on: .agents/features/20261009-role-based-access/spec.md, .agents/features/20261009-booking-schedule/spec.md, .agents/features/20261009-paymongo-payments/spec.md
 - Replaces: the `/payroll-master` placeholder from role-based-access D8/AC20.
@@ -30,6 +30,8 @@ Facts found in the code:
 - The audit log is a JSON array in `soundstage-marketplace-v1` (`marketplace-billing.ts:13-37`), written by `recordAdminAction` and `recordMarketplaceAction`.
 - `lib/server/data-service.ts:385` deletes `soundstage.records` rows whose keys disappear; `restoreBackup` replaces JSON app data (`lib/server/backup.ts:53`). `clearAppData` already refuses (`lib/clear-app-data.ts`).
 - There is no `src/` folder.
+- Hub routing bug (rev 5): `findSection` (`lib/hub-data.ts:84`) knows only `/provider*` and `/admin*` paths and falls back to `providerSections["/provider"]`, so every `/payroll-master` path gets `kind: "provider"`. `HubSection.kind` is typed `"provider" | "admin"` (`lib/hub-data.ts:59`). The client effect at `components/hubs/hub-workspace.tsx:347` then sends any non-provider on a provider-kind section to `/login`, so a payroll master who passes the server check (`app/payroll-master/layout.tsx:7`, `requireRole("payroll_master")`) is redirected away. `hubNav` (`lib/hub-data.ts:40`) has no payroll entry; sidebar label, logo link, header name, and content switch in `HubWorkspace` assume provider or admin.
+- Uncommitted work present on 2026-10-14 (author unconfirmed): `app/payroll-master/page.tsx` deleted, `app/payroll-master/[[...slug]]/page.tsx` added; it renders `HubWorkspace` with `initialPath` built from the slug.
 
 ## Decisions
 
@@ -38,7 +40,7 @@ Facts found in the code:
 | D1 | Who decides refunds and payouts | Only `payroll_master`. Booking-schedule, client, and provider specs are revised accordingly; admin hub refund and withdrawal panels become read-only. | Single owner for money decisions; separation of duties. |
 | D2 | Risk lane | High-risk. | Money and audit records. |
 | D3 | Component location | `components/payroll-master/`. | No `src/` folder. |
-| D4 | Pages | `/payroll-master` (overview KPIs), `/payroll-master/payments`, `/payroll-master/refunds`, `/payroll-master/refunds/[id]`, `/payroll-master/payouts`, `/payroll-master/payouts/[id]`, `/payroll-master/reports`, `/payroll-master/history`, `/payroll-master/subscriptions`. | Covers every requested capability; subscriptions page added in rev 2. |
+| D4 | Pages | `/payroll-master` (overview KPIs), `/payroll-master/payments`, `/payroll-master/refunds`, `/payroll-master/refunds/[id]`, `/payroll-master/disputes`, `/payroll-master/payouts`, `/payroll-master/payouts/[id]`, `/payroll-master/reports`, `/payroll-master/history`, `/payroll-master/subscriptions`. | Covers every requested capability; subscriptions page added in rev 2. |
 | D14 | Manual subscription payments | The payroll master reviews provider-submitted manual subscription payments (GCash or bank transfer reference) and marks them Paid or Rejected (reason required), using the existing activation logic; each decision writes an audit row. | Added in rev 2: admin module removes all money decisions from admin. |
 | D5 | New tables | `soundstage.audit_log` (append-only). Refund tables are owned by the refund module and payout tables by the provider payout module (20261009-provider-payouts). | Revised in rev 4: payouts moved to a shared module. |
 | D6 | Payout eligibility and amounts | Defined by the provider payout module: completed, fully paid, no open requests, not already on a non-rejected payout; net = gross − platform fee − refunds − deductions. | Revised in rev 4: platform fee and deductions added. |
@@ -49,6 +51,13 @@ Facts found in the code:
 | D11 | Audit log | Every approval, rejection, refund, and payout action inserts an `audit_log` row (actor id, role, action, target type and id, before, after, reason, timestamp) in the same transaction as the action. Triggers reject `UPDATE` and `DELETE`. The JSON audit stays for other actions. | Requirement; tamper resistance. |
 | D12 | Reports | Date range plus provider and status filters; totals for collected payments, refunds (pending, paid), payouts (pending, paid), and net; on screen and CSV. | Requirement. |
 | D13 | Boundaries | Read-only access to bookings, payments, and provider payout details. Provider registration, approvals, listings, and packages are refused server-side. Full payout account numbers appear only on detail pages, masked in lists and CSV. | Requirement; limits sensitive data exposure. |
+
+| D15 | Hub shell (rev 5) | `HubWorkspace` gets a dedicated `payroll_master` section kind instead of reusing provider routing. Built as plan 1 of this feature in the Standard lane: the server `requireRole` stays the real gate, and no data or money logic changes. | Root cause of payroll masters being redirected to `/login`; gives later plans a place to add pages. |
+| D16 | Hub navigation | The payroll sidebar lists every D4 page except the `[id]` detail pages (Overview, Payments, Refunds, Reports & disputes, Payouts, Reports, History, Subscriptions, Log out). Until a later plan builds a page, it shows an empty "coming soon" state. | Later plans fill in pages without changing navigation. |
+| D17 | Section fallback | `findSection` falls back by path prefix: unknown `/payroll-master/*` goes to the payroll overview, unknown `/admin/*` to the admin overview, and only `/provider*` (and any other path) to the provider overview. | Payroll paths can never get provider handling again. |
+| D18 | Payroll hub chrome | Sidebar label "payroll master hub", logo links to `/payroll-master`, header shows the payroll master's name and initials, and the browser redirect lets only `payroll_master` stay. No backup/restore panel, no admin event notifications, no provider verification lock or banner. | Keeps admin-only and provider-only UI out of the payroll hub. |
+| D19 | Entry route | The catch-all `app/payroll-master/[[...slug]]/page.tsx` that renders `HubWorkspace` is the entry point; `app/payroll-master/page.tsx` stays deleted. | Matches the uncommitted work; one route serves every D4 path. Its author confirms it before plan 1 is shipped. |
+| D20 | Reports and disputes | Client reports and disputes move from the admin hub (`/admin/reports`) to `/payroll-master/disputes`. Only `payroll_master` sees every report and marks reports resolved; each report shows its booking (service, status, event date, venue, downpayment, paid, refund status). The payroll master can read every booking but not booking messages. | The payroll master decides refunds, so they review the disputes behind them. Added in rev 6. |
 
 ## Out of scope
 
@@ -65,6 +74,18 @@ Access
 - AC1: THE SYSTEM SHALL serve every `/payroll-master` page and payroll server action only to signed-in users whose profile role is `payroll_master`.
 - AC2: IF a payroll master calls a provider registration, approval, listing, or package action, THEN THE SYSTEM SHALL reject it server-side.
 - AC3: THE SYSTEM SHALL show full payout account numbers only on refund and payout detail pages, and mask them (last 4 characters) in lists and CSV exports.
+
+Hub shell (rev 5)
+
+- AC29: WHEN a `payroll_master` user opens any `/payroll-master` path, THE SYSTEM SHALL render the payroll hub (payroll section kind) and SHALL NOT redirect them to `/login` or to a provider page.
+- AC30: WHEN a user whose role is not `payroll_master` reaches the payroll hub in the browser, THE SYSTEM SHALL redirect them to `/login`; the server `requireRole` check (AC1) stays in force.
+- AC31: THE SYSTEM SHALL show the payroll sidebar entries from D16, highlight the current page, and show a "coming soon" empty state for any page not yet built.
+- AC32: WHEN an unknown path under `/payroll-master` is opened, THE SYSTEM SHALL show the payroll overview; WHEN an unknown path under `/admin` is opened, THE SYSTEM SHALL show the admin overview; provider fallback behavior is unchanged.
+- AC33: THE SYSTEM SHALL NOT show the backup/restore panel, admin event notifications, or the provider verification lock or banner in the payroll hub, and the logo SHALL link to `/payroll-master`.
+- AC34: THE SYSTEM SHALL keep provider and admin hub behavior unchanged, including the provider lock (`isProviderPathLocked`).
+- AC35: THE SYSTEM SHALL NOT show Reports, Payments, or Refunds in the admin sidebar, and `/admin/reports`, `/admin/payments`, `/admin/refunds` SHALL fall back to the admin overview.
+- AC36: WHEN a payroll master opens `/payroll-master/disputes`, THE SYSTEM SHALL list every client report with its booking summary; WHEN they mark a pending report resolved, THE SYSTEM SHALL save it; IF any other role tries to resolve a report, THEN THE SYSTEM SHALL reject it.
+- AC37: THE SYSTEM SHALL give the payroll master read access to all bookings and reports without exposing booking messages.
 
 Payments and history
 
@@ -115,10 +136,10 @@ Migration and other modules
 | --- | --- | --- |
 | Security | Server-side role checks on every action; parameterized SQL; database triggers for no-delete and append-only audit; CSV formula-injection safe. | Tests for denial, concurrency, trigger rejection; CSV test. |
 | Privacy | Account numbers masked outside detail pages; reports contain no full account numbers. | Tests on list and CSV output. |
-| Accessibility | Tables have headers and captions, filters are labelled, dialogs keyboard operable, decisions announced. | Manual keyboard check. |
+| Accessibility | Payroll sidebar links are keyboard reachable with the current page marked (rev 5). Tables have headers and captions, filters are labelled, dialogs keyboard operable, decisions announced. | Manual keyboard check. |
 | Performance | Lists paged; indexes on status, created date, provider, booking. | Schema review. |
 | Observability | `audit_log` for every money decision; errors logged without account numbers. | Tests; log review. |
-| Rollback | Additive tables; JSON refund and withdrawal data untouched; reverting code restores admin actions. | Migration review. |
+| Rollback | Hub shell is code-only and reverts cleanly (rev 5). Additive tables; JSON refund and withdrawal data untouched; reverting code restores admin actions. | Migration review. |
 
 ## Follow-ups
 
@@ -132,3 +153,5 @@ Migration and other modules
 - 2026-10-09: revision 2; added D14, AC27, AC28; changed D4, AC26, Out of scope; affected plans none (not yet planned); reason: user approved the admin module (20261009-admin-module).
 - 2026-10-09: revision 3; changed D5, D9, D10, AC7-AC11, AC21, AC25; affected plans none (not yet planned); reason: user approved the refund module (20261009-refund-module).
 - 2026-10-09: revision 4; changed D5, D6, D7, D10, Out of scope, AC12-AC17, Follow-ups; affected plans none (not yet planned); reason: user approved the provider payout module (20261009-provider-payouts).
+- 2026-10-14: revision 5; added Problem facts on hub routing, D15-D19, AC29-AC34, accessibility and rollback rows; affected plans none (not yet planned); reason: user chose a dedicated payroll_master hub section instead of provider routing.
+- 2026-10-14: revision 6; added D20, AC35-AC37; changed D4, D16; affected plans none (not yet planned); reason: user moved reports and disputes from the admin hub to the payroll master and asked for payroll booking read access.

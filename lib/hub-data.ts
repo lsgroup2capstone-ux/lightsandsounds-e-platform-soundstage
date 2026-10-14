@@ -42,9 +42,15 @@ export const hubNav = {
     ["Overview", "/provider"], ["My application", "/provider/application"], ["Bookings", "/provider/bookings"], ["Messages", "/provider/messages"], ["Reports", "/provider/reports"], ["Schedule", "/provider/schedule"], ["Services", "/provider/services"], ["Subscription", "/provider/subscription"], ["Earnings", "/provider/earnings"], ["Settings", "/provider/settings"], ["Log out", "/logout"],
   ],
   admin: [
-    ["Overview", "/admin"], ["System activity", "/admin/activity"], ["Providers", "/admin/providers"], ["Reports", "/admin/reports"], ["Payments", "/admin/payments"], ["Refunds", "/admin/refunds"], ["Users", "/admin/users"], ["Analytics", "/admin/reports/analytics"], ["Audit logs", "/admin/audit-logs"], ["Log out", "/logout"],
+    ["Overview", "/admin"], ["System activity", "/admin/activity"], ["Providers", "/admin/providers"], ["Users", "/admin/users"], ["Analytics", "/admin/reports/analytics"], ["Audit logs", "/admin/audit-logs"], ["Log out", "/logout"],
+  ],
+  payroll_master: [
+    ["Overview", "/payroll-master"], ["Payments", "/payroll-master/payments"], ["Refunds", "/payroll-master/refunds"], ["Reports & disputes", "/payroll-master/disputes"], ["Payouts", "/payroll-master/payouts"], ["Reports", "/payroll-master/reports"], ["History", "/payroll-master/history"], ["Subscriptions", "/payroll-master/subscriptions"], ["Log out", "/logout"],
   ],
 } as const
+
+export const PROVIDER_UNLOCKED_PATHS: readonly string[] = ["/provider/application", "/logout"]
+export function isProviderPathLocked(path: string, approved: boolean) { return !approved && path.startsWith("/provider") && !PROVIDER_UNLOCKED_PATHS.includes(path) }
 
 export function peso(value: number) { return "₱" + value.toLocaleString("en-PH") }
 export function hubStatus(status: string) {
@@ -53,7 +59,7 @@ export function hubStatus(status: string) {
   return "bg-warning/15 text-warning border-warning/30"
 }
 
-export type HubSection = { kind: "provider" | "admin"; title: string; description: string; dataKey: string }
+export type HubSection = { kind: "provider" | "admin" | "payroll_master"; title: string; description: string; dataKey: string }
 export const providerSections: Record<string, HubSection> = {
   "/provider": { kind: "provider", title: "Provider overview", description: "Keep your event business moving from one focused workspace.", dataKey: "overview" },
   "/provider/application": { kind: "provider", title: "My application", description: "Track verification and keep your provider profile complete.", dataKey: "application" },
@@ -70,13 +76,23 @@ export const adminSections: Record<string, HubSection> = {
   "/admin/activity": { kind: "admin", title: "System activity", description: "View system actions and their full record details.", dataKey: "activity" },
   "/admin": { kind: "admin", title: "Admin overview", description: "A live-looking snapshot of marketplace health and activity.", dataKey: "overview" },
   "/admin/providers": { kind: "admin", title: "Provider approvals", description: "Verify businesses before they join the marketplace.", dataKey: "providers" },
-  "/admin/reports": { kind: "admin", title: "Reports & disputes", description: "Review marketplace reports and resolve issues quickly.", dataKey: "reports" },
-  "/admin/payments": { kind: "admin", title: "Payments & withdrawals", description: "Monitor client funds and process provider withdrawal requests manually.", dataKey: "payments" },
-  "/admin/refunds": { kind: "admin", title: "Refund queue", description: "Handle cancellation and refund requests.", dataKey: "refunds" },
   "/admin/users": { kind: "admin", title: "Users", description: "Search and manage client and provider accounts.", dataKey: "users" },
   "/admin/reports/analytics": { kind: "admin", title: "Analytics", description: "Understand bookings, revenue, and marketplace growth.", dataKey: "analytics" },
   "/admin/audit-logs": { kind: "admin", title: "Audit logs", description: "A transparent record of marketplace administration actions.", dataKey: "audit" },
 }
-export const allSections = { ...providerSections, ...adminSections }
-export const findSection = (path: string) => allSections[path] || providerSections["/provider"]
+export const payrollSections: Record<string, HubSection> = {
+  "/payroll-master": { kind: "payroll_master", title: "Payroll overview", description: "Money decisions, payouts, and financial reporting in one place.", dataKey: "overview" },
+  "/payroll-master/payments": { kind: "payroll_master", title: "Payments", description: "Review verified client and subscription payments.", dataKey: "payments" },
+  "/payroll-master/refunds": { kind: "payroll_master", title: "Refunds", description: "Decide refund requests and record their references.", dataKey: "refunds" },
+  "/payroll-master/disputes": { kind: "payroll_master", title: "Reports & disputes", description: "Review client reports and disputes before deciding refunds.", dataKey: "disputes" },
+  "/payroll-master/payouts": { kind: "payroll_master", title: "Payouts", description: "Release provider payouts for completed bookings.", dataKey: "payouts" },
+  "/payroll-master/reports": { kind: "payroll_master", title: "Reports", description: "Totals for payments, refunds, and payouts by period.", dataKey: "reports" },
+  "/payroll-master/history": { kind: "payroll_master", title: "History", description: "Every transaction, refund, payout, and audit entry.", dataKey: "history" },
+  "/payroll-master/subscriptions": { kind: "payroll_master", title: "Subscriptions", description: "Review manual provider subscription payments.", dataKey: "subscriptions" },
+}
+export const allSections = { ...providerSections, ...adminSections, ...payrollSections }
+const matchesHub = (path: string, root: string) => path === root || path.startsWith(`${root}/`)
+// Unknown paths fall back to the overview of the hub their prefix belongs to.
+export const findSection = (path: string) => allSections[path]
+  || (matchesHub(path, "/payroll-master") ? payrollSections["/payroll-master"] : matchesHub(path, "/admin") ? adminSections["/admin"] : providerSections["/provider"])
 export type AnySection = ReturnType<typeof findSection>

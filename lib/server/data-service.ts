@@ -19,6 +19,7 @@ import { RequestError } from "./request-error"
 import { KIND_RULES, buildKey, isDataUrl, isFileKind, isOwnKey, type FileKind } from "./file-keys"
 import { deleteObject, headObject, presignGet, presignPut, publicBaseUrl } from "./r2"
 import { ensureProfile } from "./profiles"
+import { assertProviderActionAllowed } from "./provider-lock"
 
 export { RequestError }
 const accountsKey = "soundstage-accounts-v2"
@@ -328,7 +329,7 @@ export const actions: Record<string, (...args: any[]) => unknown> = {
     const actor = requireRole("client"), v = record(value), booking = ownBooking(v.bookingId, "client")
     return communications.submitProviderReport({ bookingId: booking.id, client: booking.client, clientEmail: actor.email, provider: booking.provider, reason: text(v.reason, 500), details: text(v.details, 2000) })
   },
-  updateProviderReportStatus: (id, status) => { requireRole("admin"); if (status !== "Resolved") throw new RequestError("Invalid report status."); return communications.updateProviderReportStatus(id, status) },
+  updateProviderReportStatus: (id, status) => { requireRole("payroll_master"); if (status !== "Resolved") throw new RequestError("Invalid report status."); return communications.updateProviderReportStatus(id, status) },
   createWithdrawalRequest: value => {
     const actor = requireRole("provider"), v = record(value)
     const earned = bookings.getAllBookings().filter(b => ownsProviderBooking(actor, b) && b.status === "Completed" && b.paid && !b.paymentMethod?.startsWith("DEMO:")).reduce((sum, b) => sum + b.downpayment, 0)
@@ -356,14 +357,15 @@ export function visibleRecords() {
     }
     if (key.startsWith(bookingPrefix) && actor) {
       const own = actor.role === "client" && key === keyFor(bookingPrefix, actor.email)
-      const rows = (JSON.parse(raw) as Booking[]).filter(b => own || actor.role === "provider" && ownsProviderBooking(actor, b))
-      for (const b of rows) permittedIds.add(b.id)
+      const rows = (JSON.parse(raw) as Booking[]).filter(b => own || actor.role === "payroll_master" || actor.role === "provider" && ownsProviderBooking(actor, b))
+      if (actor.role !== "payroll_master") for (const b of rows) permittedIds.add(b.id)
       if (rows.length) result[key] = JSON.stringify(rows)
     }
   }
   if (actor) {
     for (const key of [keyFor("soundstage-schedule:", actor.email), `soundstage-event-notifications:${actor.role}:${actor.email.toLowerCase()}`]) if (storage.getItem(key)) result[key] = storage.getItem(key)!
     for (const key of ["soundstage-booking-messages-v1", "soundstage-provider-reports-v1"]) result[key] = JSON.stringify(JSON.parse(storage.getItem(key) || "[]").filter((v: { bookingId: string }) => permittedIds.has(v.bookingId)))
+    if (actor.role === "payroll_master") result["soundstage-provider-reports-v1"] = storage.getItem("soundstage-provider-reports-v1") || "[]"
     result["soundstage-withdrawals-v1"] = JSON.stringify(withdrawals.getWithdrawalRequests().filter(w => w.providerEmail === actor.email))
     const state = JSON.parse(storage.getItem(billingKey) || '{"subscriptions":[],"payments":[],"audit":[]}')
     result[billingKey] = JSON.stringify({ subscriptions: state.subscriptions.filter((s: { email: string }) => s.email === actor.email.toLowerCase()), payments: state.payments.filter((p: { email: string }) => p.email === actor.email.toLowerCase()), audit: [] })
@@ -433,6 +435,7 @@ export async function execute(user: AppIdentity | null, action?: string, args: u
         if (account.role === "admin") storage.setItem("soundstage-admin-account", JSON.stringify(account))
         session.setItem("soundstage-session", JSON.stringify({ role: account.role, email: account.email }))
         if (account.role === "provider" && account.application?.status === "Approved") billing.ensureProviderTrial(account.email)
+        assertProviderActionAllowed(identity.role, auth.isProviderApproved(identity.email), action, args)
       }
       let result = action ? await actions[action](...args) : null
       if (webhookSession) {
