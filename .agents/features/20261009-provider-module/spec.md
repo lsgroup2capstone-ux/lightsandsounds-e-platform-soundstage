@@ -2,7 +2,7 @@
 artifact: spec
 schema: 1
 feature: 20261009-provider-module
-revision: 5
+revision: 7
 status: spec-approved
 risk: high-risk
 ---
@@ -10,10 +10,10 @@ risk: high-risk
 # Service provider module
 
 - Feature id: 20261009-provider-module
-- Revision: 5
+- Revision: 7
 - Status: spec-approved
 - Risk lane: high-risk
-- Approved by: user, 2026-10-09
+- Approved by: user, 2026-10-09 (revision 6: user, 2026-10-13; revision 7: user, 2026-10-15)
 - Related decisions: .agents/decisions/0001-clerk-auth-profiles-roles.md (proposed), .agents/decisions/0002-bookings-relational-source.md (proposed), .agents/decisions/0004-financial-records-and-audit.md (proposed)
 - Depends on: .agents/features/20261009-role-based-access/spec.md, .agents/features/20261009-booking-schedule/spec.md
 
@@ -31,6 +31,7 @@ Facts found in the code:
 - Cloudflare R2 is not used anywhere. Signup documents are read in the browser (`components/auth/signup-form.tsx:64`, `readProviderDocuments` in `lib/client-auth.ts`).
 - No availability schedule exists; the booking-schedule feature adds `availability_schedules`.
 - There is no `src/` folder; components live in root `components/`.
+- The Services table renders a generic `More options` button without an action handler (`components/hubs/hub-workspace.tsx:50,232`). The server update path already refuses to remove a service referenced by any booking (`lib/server/data-service.ts:239-256`).
 
 ## Decisions
 
@@ -49,8 +50,9 @@ Facts found in the code:
 | D11 | Requests | Provider approves or declines reschedule requests (re-checked against availability) and client cancellation requests. | Completes client-side flows. |
 | D12 | Payments and payouts | Read-only payments received per booking, amounts awaiting payout, and payout records from the provider payout module with per-booking breakdown (gross, fee and rate, refunds, deductions with remarks, net), status, payout date, reference, and history. No withdrawal requests and no payout actions. | Revised in rev 4: provider payout module. |
 | D13 | Subscription | Reuse the existing flow unchanged: status, trial, submit payment, history. | No pricing changes requested. |
-| D14 | Unapproved providers | Access to profile, documents, portfolio, application status, and draft packages. Bookings and publishing locked with an explanatory banner. | Requirement "only approved providers may publish and receive bookings". |
+| D14 | Unapproved providers | Until the application status is `Approved` (covers not submitted, `Pending`, `Rejected`), only the Application tab (`/provider/application`) is usable. Every other sidebar item stays visible but greyed out with a lock icon; opening a locked route by URL redirects to `/provider/application` with a "waiting for verification" notice. Enforced in the UI and server-side: locked pages and actions (publish, bookings, schedule, earnings, etc.) are rejected for unapproved providers. | User decision 2026-10-13: unverified providers should only reach the submission tab; visible locks show what unlocks after approval; server checks stop URL/API bypass. |
 | D15 | Feedback | Read-only list of feedback from the feedback module for the provider's completed bookings, with average rating. | Revised in rev 5: feedback module. |
+| D16 | Service row actions | The three-dot button opens actions for that service. Edit loads its current values and updates the same service. A service with no bookings may be permanently deleted after confirmation. A service referenced by any booking offers Deactivate instead of permanent deletion; deactivation hides it from discovery and new bookings while preserving the service and booking history. | Gives providers the requested controls without breaking historical booking references. |
 
 ## Out of scope
 
@@ -61,13 +63,15 @@ Facts found in the code:
 - Migrating provider profile, packages, or portfolio to relational tables.
 - Replying to feedback.
 - Requesting or deciding payouts: payroll-master feature (D12).
+- Bulk service editing or deletion, and deletion of bookings when a service is removed.
 
 ## Acceptance criteria
 
 Access
 
 - AC1: THE SYSTEM SHALL serve every `/provider` page only to signed-in users whose profile role is `provider`, using the role-based-access helpers.
-- AC2: WHILE a provider is not Approved, THE SYSTEM SHALL show a banner explaining the locked features and SHALL reject publish and booking actions server-side.
+- AC2: WHILE a provider's application is not Approved, THE SYSTEM SHALL show only `/provider/application` as usable, SHALL render every other provider sidebar item disabled with a lock icon, SHALL redirect any other `/provider/*` route to `/provider/application` with a notice that the account is awaiting verification, and SHALL reject all provider actions other than application submission server-side.
+- AC2a: WHEN an admin approves the application, THE SYSTEM SHALL unlock all provider tabs on the provider's next page load without requiring sign-out.
 - AC3: THE SYSTEM SHALL scope every provider read and write to the signed-in provider's own data; IF a provider requests another provider's package, booking, or file, THEN THE SYSTEM SHALL respond "Not found".
 - AC4: WHEN the provider pages are in place, THE SYSTEM SHALL render the admin hub with the same sections and behavior as before.
 
@@ -87,6 +91,11 @@ Packages
 - AC13: WHEN a provider deactivates a package, THE SYSTEM SHALL hide it from clients and new bookings while existing bookings continue unchanged.
 - AC27: WHEN an admin removes a package, THE SYSTEM SHALL show the provider "Removed by admin" with the reason, and WHEN the provider edits and republishes it, THE SYSTEM SHALL publish it and flag it for admin review.
 - AC14: WHEN a provider edits a published package's price or inclusions, THE SYSTEM SHALL not change any existing booking's snapshot.
+- AC28: WHEN a provider opens a service row's three-dot menu, THE SYSTEM SHALL show Edit and SHALL show Delete only when the service has no booking references; otherwise, THE SYSTEM SHALL show Deactivate.
+- AC29: WHEN a provider chooses Edit, THE SYSTEM SHALL load that service's current values, and WHEN valid changes are saved, THE SYSTEM SHALL update the same service identity and its public listing without changing existing booking snapshots.
+- AC30: WHEN a provider confirms deletion of their service with no booking references, THE SYSTEM SHALL re-check ownership and booking references server-side, remove the service, hide it from clients, and process its image according to the file-storage lifecycle.
+- AC31: IF a service gains a booking reference before deletion completes, THEN THE SYSTEM SHALL retain the service, show a clear error, and allow the provider to deactivate it instead.
+- AC32: IF an edit, deletion, or deactivation fails, THEN THE SYSTEM SHALL keep the persisted service unchanged and show a clear error; WHEN it succeeds, THE SYSTEM SHALL refresh the service list and announce the result.
 
 Service areas and availability
 
@@ -133,3 +142,5 @@ Money, subscription, feedback
 - 2026-10-09: revision 3; changed D7; added AC27; affected plans none (not yet planned); reason: user approved the admin module (20261009-admin-module).
 - 2026-10-09: revision 4; changed D12, AC24; affected plans none (not yet planned); reason: user approved the provider payout module (20261009-provider-payouts).
 - 2026-10-09: revision 5; changed D15, AC26; affected plans none (not yet planned); reason: user approved the feedback module (20261009-feedback-module).
+- 2026-10-13: revision 6; changed D14, AC2; added AC2a; affected plans none (not yet planned); reason: user requires unverified providers to be locked to the Application tab only.
+- 2026-10-15: revision 7; added D16, AC28-AC32, a problem fact, and out-of-scope boundaries; affected plans: none (plan 1 remains valid and does not cover service actions); reason: user requires the Services three-dot menu to edit and safely delete or deactivate a service.

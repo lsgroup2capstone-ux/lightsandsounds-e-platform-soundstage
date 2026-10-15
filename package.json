@@ -14,7 +14,7 @@
     "role:set": "node scripts/role-set.cjs",
     "auth:profiles": "node scripts/migrate-identities-to-profiles.cjs",
     "sms:check": "node scripts/sms-check.cjs",
-    "test": "node --test tests/paymongo.cjs tests/paymongo-qr.cjs tests/backup.cjs tests/database-config.cjs tests/supabase-domain.cjs tests/supabase-auth.cjs tests/email-hook.cjs tests/postgres-schema.cjs tests/admin-accounts.cjs tests/billing.cjs tests/clear-app-data.cjs tests/events.cjs tests/provider-applications.cjs tests/system-activity.cjs tests/philsms.cjs tests/signup-sms.cjs tests/clerk-auth.cjs tests/clerk-password.cjs tests/app-store.cjs tests/auth-migration.cjs tests/r2-files.cjs tests/file-upload.cjs tests/profiles-schema.cjs tests/profiles.cjs tests/role-set.cjs tests/access-rules.cjs tests/access.cjs tests/proxy.cjs tests/migrate-identities.cjs",
+    "test": "node --test tests/paymongo.cjs tests/paymongo-qr.cjs tests/backup.cjs tests/database-config.cjs tests/supabase-domain.cjs tests/supabase-auth.cjs tests/email-hook.cjs tests/postgres-schema.cjs tests/admin-accounts.cjs tests/billing.cjs tests/clear-app-data.cjs tests/events.cjs tests/provider-applications.cjs tests/system-activity.cjs tests/philsms.cjs tests/signup-sms.cjs tests/clerk-auth.cjs tests/clerk-password.cjs tests/app-store.cjs tests/auth-migration.cjs tests/r2-files.cjs tests/file-upload.cjs tests/profiles-schema.cjs tests/profiles.cjs tests/role-set.cjs tests/access-rules.cjs tests/access.cjs tests/proxy.cjs tests/migrate-identities.cjs tests/provider-lock.cjs",
     "typecheck": "tsc --noEmit",
     "auth:migrate": "node scripts/migrate-clerk-to-supabase.cjs"
   },

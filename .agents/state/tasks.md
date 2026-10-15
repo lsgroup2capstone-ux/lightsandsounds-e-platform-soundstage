@@ -12,7 +12,7 @@ lines to `archive/YYYY-MM.md` at the start of each month.
 | [20261009-refund-module](../features/20261009-refund-module/) | spec-approved | - | planner | 2026-10-09 | plan after booking-schedule and payments |
 | [20261009-provider-payouts](../features/20261009-provider-payouts/) | spec-approved | - | planner | 2026-10-09 | plan after refund-module |
 | [20261009-client-module](../features/20261009-client-module/) | spec-approved (rev 5) | - | planner | 2026-10-09 | - |
-| [20261009-provider-module](../features/20261009-provider-module/) | spec-approved (rev 5) | - | planner | 2026-10-09 | - |
+| [20261009-provider-module](../features/20261009-provider-module/) | spec-approved (rev 7; plan 1 shipped) | 2 | planner | 2026-10-15 | next: plan D16/AC28-AC32 service actions; plan 1 review passed; manual provider/admin browser verification remains outstanding |
 | [20261009-payroll-master](../features/20261009-payroll-master/) | spec-approved (rev 4) | - | planner | 2026-10-09 | - |
 | [20261009-admin-module](../features/20261009-admin-module/) | spec-approved | - | planner | 2026-10-09 | - |
 | [20261009-feedback-module](../features/20261009-feedback-module/) | spec-approved | - | planner | 2026-10-09 | build step 11 (ADR 0005) |
