@@ -8,8 +8,10 @@ import { Badge } from "@/components/ui/badge"
 import { type ServicePackage, formatPeso } from "@/lib/mock-data"
 import { isLoggedIn } from "@/lib/client-auth"
 import { publicFileUrl } from "@/lib/file-upload"
+import { StarRating } from "@/components/site/star-rating"
+import type { RatingSummary } from "@/lib/service-ratings"
 
-export function PackageCard({ pkg }: { pkg: ServicePackage }) {
+export function PackageCard({ pkg, rating }: { pkg: ServicePackage; rating?: RatingSummary }) {
   const router = useRouter()
   const packageHref = pkg.id.startsWith("service-") ? `/listed-services/${pkg.id}` : `/services/${pkg.id}`
 
@@ -49,6 +51,7 @@ export function PackageCard({ pkg }: { pkg: ServicePackage }) {
             {pkg.name}
           </h3>
         </div>
+        {rating && (rating.count ? <StarRating rating={rating.average} reviews={rating.count} /> : <p className="text-xs text-muted-foreground">No reviews yet</p>)}
         <p className="text-sm text-muted-foreground line-clamp-2">{pkg.tagline}</p>
         <div className="flex items-center gap-3 text-xs text-muted-foreground">
           <span className="inline-flex items-center gap-1">

@@ -21,14 +21,14 @@ function write(state: State) { storage.setItem(KEY, JSON.stringify(state)); even
 const normalized = (email: string) => email.trim().toLowerCase()
 function entry(action: string, target: string, before: string, after: string): AuditEntry {
   const actor = getAccount()
-  if (actor?.role !== "admin") throw new Error("Administrator access required.")
+  if (actor?.role !== "admin" && actor?.role !== "payroll_master") throw new Error("Administrator or payroll master access required.")
   return { id: crypto.randomUUID(), actor: `${actor.firstName} ${actor.lastName} (${actor.email})`, action, target, before, after, at: new Date().toISOString() }
 }
 export function recordAdminAction(action: string, target: string, before: string, after: string) {
   if (before === after) return
   const state = read(); state.audit.unshift(entry(action, target, before, after)); write(state)
 }
-export function getAuditEntries() { return getAccount()?.role === "admin" ? read().audit : [] }
+export function getAuditEntries() { const role = getAccount()?.role; return role === "admin" || role === "payroll_master" ? read().audit : [] }
 export function recordMarketplaceAction(action: string, target: string, before: string, after: string) {
   const actor = getAccount()
   if (!actor || before === after) return
@@ -68,7 +68,7 @@ export function subscriptionStatus(subscription: Subscription, now = Date.now())
 }
 export function getSubscriptionPayments() {
   const actor = getAccount()
-  return read().payments.filter(p => actor?.role === "admin" || (actor?.role === "provider" && p.email === normalized(actor.email)))
+  return read().payments.filter(p => actor?.role === "admin" || actor?.role === "payroll_master" || (actor?.role === "provider" && p.email === normalized(actor.email)))
 }
 export function submitSubscriptionPayment(planName: string, method: string, reference: string) {
   const actor = getAccount(); const plan = plans.find(p => p.name === planName)

@@ -99,7 +99,8 @@ export function requestBookingRefund(id: string, method: string, account: string
 }
 
 export function reviewBookingRefund(id: string, status: "Paid" | "Rejected", details: string) {
-  if (getAccount()?.role !== "admin") throw new Error("Administrator access required.")
+  const role = getAccount()?.role
+  if (role !== "admin" && role !== "payroll_master") throw new Error("Administrator or payroll master access required.")
   if (!["Paid", "Rejected"].includes(status) || details.trim().length < 3 || details.length > 200) throw new Error("Enter a payout reference or rejection reason (3–200 characters).")
   const keys = Array.from({ length: storage.length }, (_, i) => storage.key(i)).filter((key): key is string => Boolean(key?.startsWith(BOOKINGS_PREFIX)))
   for (const key of keys) {

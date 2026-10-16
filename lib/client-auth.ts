@@ -46,7 +46,8 @@ export async function resendVerification() {
   if (!clerk.client?.signUp.id) throw new Error("Start signup again to request a verification email.")
   await clerk.client.signUp.prepareEmailAddressVerification({ strategy: "email_code" })
 }
-export async function loginWithEmailAutomatically(email: string, password: string): Promise<AccountRole | null> {
+// "code" means Clerk sent an email code that the login form must collect.
+export async function loginWithEmailAutomatically(email: string, password: string): Promise<AccountRole | "code" | null> {
   email = email.trim().toLowerCase()
   // Local administrator addresses are not public email identifiers accepted by Clerk.
   if (/^[^\s@]+@[^\s@]+\.local$/.test(email)) return (await loginWithAdmin(email, password)).role
@@ -60,6 +61,23 @@ export async function loginWithEmailAutomatically(email: string, password: strin
     return null
   })
   if (!result) return legacyRole
+  if (result.status === "needs_client_trust" || result.status === "needs_second_factor") {
+    const factor = result.supportedSecondFactors?.find(item => item.strategy === "email_code")
+    if (factor && "emailAddressId" in factor) {
+      await clerk.client.signIn.prepareSecondFactor({ strategy: "email_code", emailAddressId: factor.emailAddressId })
+      return "code"
+    }
+  }
+  return activateClerkSignIn(result)
+}
+export async function verifyLoginCode(code: string): Promise<AccountRole | null> {
+  const clerk = await getClerkBrowser()
+  if (!clerk.client) throw new Error("Authentication is still loading. Please try again.")
+  const result = await clerk.client.signIn.attemptSecondFactor({ strategy: "email_code", code: code.trim() })
+  return activateClerkSignIn(result)
+}
+async function activateClerkSignIn(result: { status: string | null; createdSessionId: string | null }): Promise<AccountRole | null> {
+  const clerk = await getClerkBrowser()
   if (result.status !== "complete" || !result.createdSessionId) {
     location.assign("/auth/clerk/continue")
     return null
@@ -185,6 +203,7 @@ function readAccounts(): StoredAccount[] { try { const records = JSON.parse(appS
 function findAccount(role: AccountRole, email: string) { return readAccounts().find((account) => account.role === role && account.email.toLowerCase() === email.trim().toLowerCase()) || null }
 function readSession(): AccountSession | null { try { return JSON.parse(sessionView.getItem(SESSION_KEY) || "null") as AccountSession | null } catch { return null } }
 function readAdminAccount(): StoredAccount | null { try { return JSON.parse(appStorage.getItem(ADMIN_ACCOUNT_KEY) || "null") } catch { return null } }
+export function getApprovedProviders(): ClientAccount[] { return readAccounts().filter((account) => account.role === "provider" && account.application?.status === "Approved").map(({ password: _password, ...account }) => account) }
 export function isProviderApproved(email: string) { return findAccount("provider", email)?.application?.status === "Approved" }
 // Shape checks only; the server also checks that each key belongs to the provider.
 export function validateProviderDocuments(documents: ProviderDocument[]) {

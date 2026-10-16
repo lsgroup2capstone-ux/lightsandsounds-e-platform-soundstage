@@ -20,15 +20,11 @@ export function Hero() {
 
       <div className="mx-auto max-w-6xl px-4 pb-24 pt-24 sm:px-6 sm:pt-32">
         <div className="mx-auto max-w-3xl text-center">
-          <span className="inline-flex items-center gap-2 rounded-full bg-card/80 px-3.5 py-1.5 text-xs font-medium text-muted-foreground shadow-soft backdrop-blur">
-            <span className="flex h-1.5 w-1.5 rounded-full bg-success" />
-            Serving Balayan, Nasugbu &amp; Lian, Batangas
-          </span>
-          <h1 className="mt-6 text-5xl font-semibold leading-[1.05] tracking-tight text-foreground text-balance sm:text-7xl">
+          <h1 className="text-5xl font-semibold leading-[1.05] tracking-tight text-foreground text-balance sm:text-7xl">
             Book lights &amp; sounds for your event, <span className="text-muted-foreground">all in one place</span>
           </h1>
           <p className="mx-auto mt-5 max-w-xl text-base leading-relaxed text-muted-foreground text-pretty sm:text-xl">
-            Skip the group chats and guesswork. Browse realistic demo providers, explore availability screens, and preview the full booking flow — from fiestas to weddings.
+            Skip the group chats and guesswork. Browse realistic providers, explore availability screens, and preview the full booking flow — from fiestas to weddings.
           </p>
           <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Button asChild size="lg" className="w-full sm:w-auto">
@@ -49,9 +45,6 @@ export function Hero() {
             <span className="inline-flex items-center gap-1.5">
               <MapPin width={16} height={16} className="text-primary" />
               Local coverage
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <span className="font-semibold text-foreground">Demo-ready</span> booking &amp; checkout flow
             </span>
           </div>
         </div>

@@ -46,6 +46,18 @@ before continuing.
 | `.agents/decisions/` | Project-wide decisions (ADRs) that outlive one feature |
 | `.agents/state/tasks.md` | One-line index of every active feature and its status |
 
+## Documentation vault
+
+`.agents/docs/` is the Obsidian-compatible project knowledge base. Before
+coding, read `.agents/docs/Home.md`, the relevant module or architecture note,
+and the feature's own artifacts. Treat the approved spec and actual source as
+authoritative when a vault summary is stale or incomplete.
+
+After a validated task, update only the affected vault notes. Record verified
+progress, accepted decisions, and reproducible bugs with links to their source
+artifacts. Never mark a feature complete from an implementation claim alone;
+use the SDD status and independent review or other required validation evidence.
+
 ## Non-negotiables
 
 - No code for a feature without an approved spec and an approved plan. Tiny

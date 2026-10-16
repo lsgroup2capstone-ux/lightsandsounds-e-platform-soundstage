@@ -15,7 +15,7 @@ export function getSystemActivity(): SystemActivity[] {
   }
   for (const a of getAccountsForAdmin()) {
     const application = a.application
-    add(`account-${a.role}-${a.email}`, a.email, "Accounts", `${a.role === "provider" ? "Provider" : "Client"} account`, `${a.firstName} ${a.lastName}`, "", a.email, [["Name", `${a.firstName} ${a.lastName}`], ["Email", a.email], ["Mobile", a.mobile], ["Role", a.role], ["Business", a.business || "None"]], a.role === "provider" ? anchor("/admin/providers", `activity-provider-${a.email}`) : undefined)
+    add(`account-${a.role}-${a.email}`, a.email, "Accounts", `${({ provider: "Provider", admin: "Admin", payroll_master: "Payroll master" } as Record<string, string>)[a.role] || "Client"} account`, `${a.firstName} ${a.lastName}`, "", a.email, [["Name", `${a.firstName} ${a.lastName}`], ["Email", a.email], ["Mobile", a.mobile], ["Role", a.role], ["Business", a.business || "None"]], a.role === "provider" ? anchor("/admin/providers", `activity-provider-${a.email}`) : undefined)
     if (application) add(`application-${a.email}`, a.email, "Providers", "Provider application", a.business || a.email, application.reviewedAt || application.submittedAt, application.status, [["Email", a.email], ["Status", application.status], ["Submitted", application.submittedAt], ["Reviewed", application.reviewedAt || "Pending"], ["Admin notes", application.reason || "None"]], anchor("/admin/providers", `activity-provider-${a.email}`))
   }
   for (const b of getAllBookings()) {

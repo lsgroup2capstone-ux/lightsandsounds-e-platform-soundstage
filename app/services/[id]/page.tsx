@@ -5,6 +5,7 @@ import { ArrowLeft, BadgeCheck, Calendar, Check, MapPin, Sparkles, Users } from 
 import { SiteHeader } from "@/components/site/site-header"
 import { SiteFooter } from "@/components/site/site-footer"
 import { BookingFlow } from "@/components/booking/booking-flow"
+import { ServiceReviews } from "@/components/site/service-reviews"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
@@ -99,6 +100,8 @@ export default async function ServiceDetailPage({ params }: { params: Promise<{ 
                 ))}
               </ul>
             </section>
+
+            <ServiceReviews serviceId={pkg.id} />
 
             <Separator className="my-8 bg-border/60" />
 

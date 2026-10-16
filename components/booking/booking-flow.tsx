@@ -43,10 +43,10 @@ export function BookingFlow({ pkg, trigger }: { pkg: ServicePackage; trigger: Re
   const [availabilityReady, setAvailabilityReady] = useState(false)
   const [date, setDate] = useState("")
   const [time, setTime] = useState("")
+  const [endTime, setEndTime] = useState("")
   const [eventType, setEventType] = useState("")
   const [venue, setVenue] = useState("")
   const [eventTown, setEventTown] = useState("")
-  const [guests, setGuests] = useState("")
   const [notes, setNotes] = useState("")
   const [durationDays, setDurationDays] = useState(1)
   const [bookingError, setBookingError] = useState("")
@@ -65,7 +65,7 @@ export function BookingFlow({ pkg, trigger }: { pkg: ServicePackage; trigger: Re
   const totalPrice = servicePrice + transportationFee
   const downpayment = Math.round(totalPrice * 0.3)
   const balance = totalPrice - downpayment
-  const canProceed = availabilityReady && !findBookingConflict() && date && time.trim() && eventType.trim() && eventTown && venue && guests
+  const canProceed = availabilityReady && !findBookingConflict() && date && time.trim() && eventType.trim() && eventTown && venue
 
   useEffect(() => {
     if (!open) return
@@ -90,10 +90,10 @@ export function BookingFlow({ pkg, trigger }: { pkg: ServicePackage; trigger: Re
     setCheckoutUrl("")
     setDate("")
     setTime("")
+    setEndTime("")
     setEventType("")
     setVenue("")
     setEventTown("")
-    setGuests("")
     setNotes("")
     setDurationDays(1)
     setBookingError("")
@@ -121,10 +121,10 @@ export function BookingFlow({ pkg, trigger }: { pkg: ServicePackage; trigger: Re
       client: client ? `${client.firstName} ${client.lastName}` : "Client",
       image: pkg.image,
       date,
-      time: time.trim(),
+      time: endTime.trim() ? `${time.trim()} – ${endTime.trim()}` : time.trim(),
       eventType: eventType.trim(),
       location: venue,
-      guests: Number(guests),
+      guests: 0,
       notes,
       durationDays,
       basePrice: pkg.price,
@@ -222,9 +222,15 @@ export function BookingFlow({ pkg, trigger }: { pkg: ServicePackage; trigger: Re
                 <span className="text-sm font-medium">Event date</span>
                 <BookingDatePicker value={date} onChange={selectDate} min={today()} disabled={!availabilityReady} isUnavailable={day => Boolean(findBookingConflict(day))} />
               </div>
+              <div className="flex flex-col gap-3">
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="bk-time">Start time</Label>
                 <Input id="bk-time" type="text" placeholder="e.g. 6:00 PM" maxLength={64} value={time} onChange={(e) => setTime(e.target.value)} />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="bk-end-time">End time (optional)</Label>
+                <Input id="bk-end-time" type="text" placeholder="e.g. 11:00 PM" maxLength={30} value={endTime} onChange={(e) => setEndTime(e.target.value)} />
+              </div>
               </div>
             </div>
             <div className="flex flex-col gap-1.5">
@@ -258,17 +264,6 @@ export function BookingFlow({ pkg, trigger }: { pkg: ServicePackage; trigger: Re
               />
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="bk-guests">Expected guests</Label>
-              <Input
-                id="bk-guests"
-                type="number"
-                min={1}
-                value={guests}
-                onChange={(e) => setGuests(e.target.value)}
-                placeholder="e.g. 300"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
               <Label htmlFor="bk-notes">Notes for the provider (optional)</Label>
               <Textarea
                 id="bk-notes"
@@ -292,12 +287,11 @@ export function BookingFlow({ pkg, trigger }: { pkg: ServicePackage; trigger: Re
               <p className="font-semibold text-foreground">{pkg.name}</p>
               <p className="text-sm text-muted-foreground">{pkg.provider.name}</p>
               <div className="mt-3 flex flex-col gap-2 text-sm">
-                <Row icon={<CalendarDays width={15} height={15} />} label={`${date} at ${time}`} />
+                <Row icon={<CalendarDays width={15} height={15} />} label={`${date} at ${endTime.trim() ? `${time.trim()} – ${endTime.trim()}` : time}`} />
                 <Row icon={<Users width={15} height={15} />} label={`Event type: ${eventType}`} />
                 <Row icon={<CalendarDays width={15} height={15} />} label={`${durationDays} day${durationDays === 1 ? "" : "s"} · ends ${formatEndDate(date, durationDays)}`} />
                 <Row icon={<MapPin width={15} height={15} />} label={eventTown} />
                 <Row icon={<MapPin width={15} height={15} />} label={venue} />
-                <Row icon={<Users width={15} height={15} />} label={`${guests} guests`} />
               </div>
             </div>
             <div className="flex flex-col gap-2 rounded-lg bg-muted/60 p-4 text-sm">

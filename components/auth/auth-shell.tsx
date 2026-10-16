@@ -20,8 +20,10 @@ export function AuthShell({
   return (
     <div className="flex min-h-screen">
       {/* Brand panel */}
-      <aside className="relative hidden w-1/2 flex-col justify-between overflow-hidden p-10 lg:flex">
-        <Image src="/images/hero-stage.webp" alt="" fill sizes="50vw" className="object-cover opacity-30" />
+      <aside className="sticky top-0 hidden h-screen w-1/2 shrink-0 flex-col justify-between overflow-hidden p-10 lg:flex">
+        <div className="absolute inset-0">
+          <Image src="/images/hero-stage.webp" alt="" fill priority sizes="50vw" className="object-cover opacity-30" />
+        </div>
         <div className="absolute inset-0 bg-gradient-to-br from-background/80 via-background/70 to-background" />
         <div className="absolute inset-0 bg-[radial-gradient(60%_50%_at_20%_10%,rgba(0,229,255,0.14),transparent_65%),radial-gradient(50%_50%_at_90%_90%,rgba(176,38,255,0.14),transparent_60%)]" />
         <div className="relative">

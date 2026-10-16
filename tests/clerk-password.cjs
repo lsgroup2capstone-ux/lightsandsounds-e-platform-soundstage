@@ -79,6 +79,20 @@ test('Clerk password login returns saved roles and delegates extra verification'
     }
   }
 })
+test('Clerk client trust and email second factor are verified in the login form', async () => {
+  for (const status of ['needs_client_trust', 'needs_second_factor']) {
+    const { auth, calls, signIn, redirects, account } = fixture('client')
+    signIn.create = async () => ({ status, createdSessionId: null, supportedSecondFactors: [{ strategy: 'email_code', emailAddressId: 'email-1' }] })
+    signIn.prepareSecondFactor = async input => { calls.push(['send-2fa', input]) }
+    signIn.attemptSecondFactor = async input => { if (input.code !== '424242') throw new Error('Invalid code'); return { status: 'complete', createdSessionId: 'session-2' } }
+    assert.equal(await auth.loginWithEmailAutomatically(account.email, 'password'), 'code')
+    assert.deepEqual(calls.find(c => c[0] === 'send-2fa'), ['send-2fa', { strategy: 'email_code', emailAddressId: 'email-1' }])
+    await assert.rejects(auth.verifyLoginCode('000000'), /Invalid/)
+    assert.equal(await auth.verifyLoginCode(' 424242 '), 'client')
+    assert.equal(calls.find(c => c[0] === 'activate')[1].session, 'session-2')
+    assert.deepEqual(redirects, [])
+  }
+})
 test('Clerk recovery rejects missing, invalid, swapped, resent and reused attempts', async () => {
   for (const role of ['client', 'provider']) {
     const { auth, calls, account, signIn } = fixture(role)

@@ -18,7 +18,7 @@ function read(): State {
   return JSON.parse(appStorage.getItem(KEY) || '{"subscriptions":[],"payments":[],"audit":[]}')
 }
 const normalized = (email: string) => email.trim().toLowerCase()
-export function getAuditEntries() { return getAccount()?.role === "admin" ? read().audit : [] }
+export function getAuditEntries() { const role = getAccount()?.role; return role === "admin" || role === "payroll_master" ? read().audit : [] }
 
 export function payDemoSubscription(planName: string, method: string) { return mutate<SubscriptionPayment>("payDemoSubscription", [planName, method]) }
 export function ensureProviderTrial(email: string) {
@@ -33,7 +33,7 @@ export function subscriptionStatus(subscription: Subscription, now = Date.now())
 }
 export function getSubscriptionPayments() {
   const actor = getAccount()
-  return read().payments.filter(p => actor?.role === "admin" || (actor?.role === "provider" && p.email === normalized(actor.email)))
+  return read().payments.filter(p => actor?.role === "admin" || actor?.role === "payroll_master" || (actor?.role === "provider" && p.email === normalized(actor.email)))
 }
 export function submitSubscriptionPayment(planName: string, method: string, reference: string) { return mutate<void>("submitSubscriptionPayment", [planName, method, reference]) }
 export function reviewSubscriptionPayment(id: string, status: "Paid" | "Rejected") { return mutate<void>("reviewSubscriptionPayment", [id, status]) }

@@ -2,11 +2,11 @@
 
 import Link from "next/link"
 import { useEffect, useState } from "react"
-import { UserRound } from "lucide-react"
 import { Logo } from "@/components/site/logo"
 import { ThemeToggle } from "@/components/site/theme-toggle"
 import { Button } from "@/components/ui/button"
-import { isLoggedIn } from "@/lib/client-auth"
+import { getAccount, type ClientAccount } from "@/lib/client-auth"
+import { publicFileUrl } from "@/lib/file-upload"
 
 const nav = [
   { label: "Browse", href: "/browse" },
@@ -16,10 +16,14 @@ const nav = [
 ]
 
 export function SiteHeader() {
-  const [signedIn, setSignedIn] = useState(false)
+  const [account, setAccount] = useState<ClientAccount | null>(null)
+  const signedIn = account !== null
+  const displayName = account ? `${account.firstName} ${account.lastName}`.trim() || "Client profile" : ""
+  const initials = account ? `${account.firstName[0] ?? ""}${account.lastName[0] ?? ""}`.toUpperCase() || "CL" : ""
+  const avatarUrl = publicFileUrl(account?.profileImage)
 
   useEffect(() => {
-    const refresh = () => setSignedIn(isLoggedIn())
+    const refresh = () => setAccount(getAccount())
     refresh()
     window.addEventListener("soundstage-account-updated", refresh)
     return () => window.removeEventListener("soundstage-account-updated", refresh)
@@ -43,9 +47,15 @@ export function SiteHeader() {
         <div className="flex items-center gap-2">
           <ThemeToggle />
           {signedIn ? (
-            <Button asChild size="sm">
-              <Link href="/dashboard"><UserRound width={16} height={16} /> Client profile</Link>
-            </Button>
+            <Link
+              href="/dashboard"
+              className="flex items-center gap-2 rounded-full bg-card py-1 pl-1 pr-4 text-sm font-medium text-foreground shadow-sm ring-1 ring-border/60 transition-colors hover:bg-muted"
+            >
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary/15 text-xs font-semibold text-primary">
+                {avatarUrl ? <img src={avatarUrl} alt="" className="h-full w-full object-cover" /> : initials}
+              </span>
+              <span className="max-w-[10rem] truncate">{displayName}</span>
+            </Link>
           ) : (
             <>
               <Button asChild variant="ghost" size="sm" className="h-11 text-muted-foreground hover:text-foreground sm:h-8">

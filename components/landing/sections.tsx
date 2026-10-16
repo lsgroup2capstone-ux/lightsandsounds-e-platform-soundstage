@@ -100,7 +100,7 @@ export function Coverage() {
   ]
   return (
     <section id="coverage" className="scroll-mt-20 bg-card">
-      <div className="mx-auto grid max-w-6xl items-center gap-12 px-4 py-24 sm:px-6 lg:grid-cols-2">
+      <div className="mx-auto max-w-6xl px-4 py-24 sm:px-6">
         <div>
           <p className="text-base font-semibold text-primary">Coverage</p>
           <h2 className="mt-2 text-4xl font-semibold tracking-tight text-foreground text-balance sm:text-5xl">
@@ -122,26 +122,6 @@ export function Coverage() {
             ))}
           </div>
         </div>
-        <Card className="relative overflow-hidden bg-background p-2">
-          <div className="relative flex aspect-[4/3] items-center justify-center overflow-hidden rounded-md bg-muted/50">
-            <div className="absolute inset-0 opacity-[0.07] [background-image:linear-gradient(to_right,var(--foreground)_1px,transparent_1px),linear-gradient(to_bottom,var(--foreground)_1px,transparent_1px)] [background-size:32px_32px]" />
-            {[
-              { top: "34%", left: "28%", label: "Balayan" },
-              { top: "58%", left: "52%", label: "Nasugbu" },
-              { top: "46%", left: "72%", label: "Lian" },
-            ].map((pin) => (
-              <div key={pin.label} className="absolute flex flex-col items-center" style={{ top: pin.top, left: pin.left }}>
-                <span className="relative flex h-3 w-3">
-                  <span className="absolute inline-flex h-full w-full motion-safe:animate-ping rounded-full bg-primary/60" />
-                  <span className="relative inline-flex h-3 w-3 rounded-full bg-primary" />
-                </span>
-                <span className="mt-1.5 rounded-full bg-card/90 px-2 py-0.5 text-[11px] font-medium text-foreground shadow-soft backdrop-blur">
-                  {pin.label}
-                </span>
-              </div>
-            ))}
-          </div>
-        </Card>
       </div>
     </section>
   )

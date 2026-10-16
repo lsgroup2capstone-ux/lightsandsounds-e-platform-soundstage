@@ -18,13 +18,11 @@ const columns = [
       { label: "Subscription plans", href: "/#providers" },
       { label: "Provider login", href: "/login" },
       { label: "Provider workspace", href: "/provider" },
-      { label: "Admin demo", href: "/admin" },
     ],
   },
   {
     title: "Support",
     links: [
-      { label: "Help center", href: "/#" },
       { label: "Terms & conditions", href: "/#" },
       { label: "Refund policy", href: "/#" },
     ],

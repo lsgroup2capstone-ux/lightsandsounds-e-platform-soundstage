@@ -14,6 +14,7 @@ export type ProviderService = {
   providerName: string
   active: boolean
   bookings: number
+  category?: "Sound System" | "Lighting" | "Full Production" | "Band & Stage"
 }
 
 const SERVICES_PREFIX = "soundstage-provider-services-v2:"

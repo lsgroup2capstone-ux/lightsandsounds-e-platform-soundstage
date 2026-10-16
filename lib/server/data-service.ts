@@ -20,6 +20,7 @@ import { KIND_RULES, buildKey, isDataUrl, isFileKind, isOwnKey, type FileKind } 
 import { deleteObject, headObject, presignGet, presignPut, publicBaseUrl } from "./r2"
 import { ensureProfile } from "./profiles"
 import { assertProviderActionAllowed } from "./provider-lock"
+import { SERVICE_RATINGS_KEY, buildServiceRatings } from "../service-ratings"
 
 export { RequestError }
 const accountsKey = "soundstage-accounts-v2"
@@ -72,12 +73,13 @@ async function verifiedKey(kind: FileKind, email: string, value: unknown, previo
   if (!head || head.size > KIND_RULES[kind].maxBytes || !KIND_RULES[kind].types.includes(head.type)) throw new RequestError("The upload did not finish. Please try again.")
   return key
 }
+const serviceCategories = ["Sound System", "Lighting", "Full Production", "Band & Stage"]
 async function serviceInput(value: unknown, previous: { id: string; image: string }[] = []) {
   const a = requireRole("provider")
   const v = record(value)
   const id = text(v.id, 100)
   if (Object.entries(storage.values).some(([k, raw]) => k.startsWith(servicePrefix) && k !== keyFor(servicePrefix, a.email) && JSON.parse(raw).some((s: { id: string }) => s.id === id))) throw new RequestError("Service ID already exists.")
-  return { id, name: text(v.name, 200), location: text(v.location, 200), coverageAreas: text(v.coverageAreas || v.location, 2000), transportationFee: finite(v.transportationFee || 0), description: String(v.description || "").slice(0, 5000), price: finite(v.price, 1), image: await verifiedKey("service-image", a.email, v.image, previous.find(s => s.id === id)?.image), providerName: providerName(a), active: v.active === true, bookings: 0 }
+  return { id, name: text(v.name, 200), location: text(v.location, 200), coverageAreas: text(v.coverageAreas || v.location, 2000), transportationFee: finite(v.transportationFee || 0), description: String(v.description || "").slice(0, 5000), price: finite(v.price, 1), image: await verifiedKey("service-image", a.email, v.image, previous.find(s => s.id === id)?.image), providerName: providerName(a), active: v.active === true, bookings: 0, category: serviceCategories.includes(String(v.category)) ? v.category as services.ProviderService["category"] : "Full Production" }
 }
 async function updateProfile(value: unknown, role: "client" | "provider") {
   const actor = requireRole(role)
@@ -259,7 +261,7 @@ export const actions: Record<string, (...args: any[]) => unknown> = {
     const service = services.getProviderServices().find(s => s.id === v.packageId && s.active)
     if (!service) throw new RequestError("Service is no longer available.")
     const duration = finite(v.durationDays || 1, 1, 30)
-    if (!Number.isInteger(duration) || !Number.isInteger(v.guests)) throw new RequestError("Use whole numbers for guests and days.")
+    if (!Number.isInteger(duration)) throw new RequestError("Use whole numbers for days.")
     const date = text(v.date, 10)
     const start = Date.parse(date + "T00:00:00Z")
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(start) || new Date(start).toISOString().slice(0, 10) !== date) throw new RequestError("Invalid event date.")
@@ -275,7 +277,7 @@ export const actions: Record<string, (...args: any[]) => unknown> = {
     const transportationFee = outside ? getTransportationFee(eventTown, townsAway) : 0
     const total = base + transportationFee
     paymentKey()
-    const saved: Booking = { id: crypto.randomUUID(), packageId: service.id, packageName: service.name, provider: service.providerName, client: fullName(actor), image: service.image, date, time: text(v.time, 64), ...(v.eventType !== undefined ? { eventType: text(v.eventType, 100) } : {}), location: text(v.location, 500), guests: finite(v.guests, 1, 100000), notes: String(v.notes || "").slice(0, 5000), durationDays: duration, basePrice: service.price, transportationFee, eventTown, townsAway, total, downpayment: Math.round(total * .3), status: "Pending", paid: false, paymentMethod: `PayMongo: ${text(v.paymentMethod, 50)}` }
+    const saved: Booking = { id: crypto.randomUUID(), packageId: service.id, packageName: service.name, provider: service.providerName, client: fullName(actor), image: service.image, date, time: text(v.time, 64), ...(v.eventType !== undefined ? { eventType: text(v.eventType, 100) } : {}), location: text(v.location, 500), guests: v.guests === undefined ? 0 : finite(v.guests, 0, 100000), notes: String(v.notes || "").slice(0, 5000), durationDays: duration, basePrice: service.price, transportationFee, eventTown, townsAway, total, downpayment: Math.round(total * .3), status: "Pending", paid: false, paymentMethod: `PayMongo: ${text(v.paymentMethod, 50)}` }
     const checkout = await startPayment(actor.email, saved.id, saved.packageName + " deposit", saved.downpayment, text(v.paymentMethod, 50), "booking")
     bookings.saveClientBooking(saved)
     return checkout
@@ -296,7 +298,7 @@ export const actions: Record<string, (...args: any[]) => unknown> = {
  if (!booking.paid && booking.paymentMethod?.startsWith("PayMongo:")) throw new RequestError("Complete payment before changing this booking. Contact support to cancel an unpaid checkout."); if (!["Confirmed", "Cancelled", "Completed"].includes(status)) throw new RequestError("Invalid booking status."); return bookings.updateClientBookingStatus(id, status) },
   submitEventFeedback: (id, rating, comment) => { ownBooking(id, "client"); return bookings.submitEventFeedback(id, rating, text(comment, 2000)) },
   requestBookingRefund: (id, method, account) => { ownBooking(id, "client"); return bookings.requestBookingRefund(id, method, text(account, 200)) },
-  reviewBookingRefund: (id, status, details) => { requireRole("admin"); return bookings.reviewBookingRefund(id, status, text(details, 200)) },
+  reviewBookingRefund: (id, status, details) => { requireRole("payroll_master", "admin"); return bookings.reviewBookingRefund(id, status, text(details, 200)) },
   createSubscriptionCheckout: async (name, method) => {
     const actor = requireRole("provider")
     const plan = billing.plans.find(p => p.name === name)
@@ -320,7 +322,7 @@ export const actions: Record<string, (...args: any[]) => unknown> = {
     return settlePayment(payment)
   },
   submitSubscriptionPayment: (plan, method, reference) => { requireRole("provider"); return billing.submitSubscriptionPayment(plan, method, text(reference, 100)) },
-  reviewSubscriptionPayment: (id, status) => { requireRole("admin"); if (!["Paid", "Rejected"].includes(status)) throw new RequestError("Invalid payment status."); return billing.reviewSubscriptionPayment(id, status) },
+  reviewSubscriptionPayment: (id, status) => { requireRole("payroll_master", "admin"); if (!["Paid", "Rejected"].includes(status)) throw new RequestError("Invalid payment status."); return billing.reviewSubscriptionPayment(id, status) },
   sendBookingMessage: value => {
     const actor = requireRole("client", "provider"), v = record(value), booking = ownBooking(v.bookingId)
     return communications.sendBookingMessage({ bookingId: booking.id, client: booking.client, provider: booking.provider, senderRole: actor.role as "client" | "provider", senderName: actor.role === "provider" ? providerName(actor) : fullName(actor), body: text(v.body, 4000) })
@@ -338,13 +340,18 @@ export const actions: Record<string, (...args: any[]) => unknown> = {
     if (amount > earned - reserved) throw new RequestError("Withdrawal exceeds your available verified balance. Demo payments cannot be withdrawn.")
     return withdrawals.createWithdrawalRequest({ provider: providerName(actor), providerEmail: actor.email, amount, payoutMethod: text(v.payoutMethod, 50), payoutAccount: text(v.payoutAccount, 255) })
   },
-  updateWithdrawalStatus: (id, status) => { requireRole("admin"); if (!["Paid", "Rejected"].includes(status)) throw new RequestError("Invalid withdrawal status."); return withdrawals.updateWithdrawalStatus(id, status) },
+  updateWithdrawalStatus: (id, status) => { requireRole("payroll_master", "admin"); if (!["Paid", "Rejected"].includes(status)) throw new RequestError("Invalid withdrawal status."); return withdrawals.updateWithdrawalStatus(id, status) },
+}
+
+function publicServiceRatings() {
+  const all = Object.entries(storage.values).filter(([key]) => key.startsWith(bookingPrefix)).flatMap(([, raw]) => { try { return JSON.parse(raw) as Booking[] } catch { return [] } })
+  return JSON.stringify(buildServiceRatings(all))
 }
 
 export function visibleRecords() {
   const actor = auth.getAccount()
-  if (actor?.role === "admin") return { ...storage.values }
-  const result: Record<string, string> = {}
+  if (actor?.role === "admin") return { ...storage.values, [SERVICE_RATINGS_KEY]: publicServiceRatings() }
+  const result: Record<string, string> = { [SERVICE_RATINGS_KEY]: publicServiceRatings() }
   const providers = allAccounts().filter(a => a.role === "provider" && a.application?.status === "Approved")
   const publicProfiles = providers.filter(a => a.email !== actor?.email).map(a => ({ firstName: a.firstName, lastName: a.lastName, email: a.email, mobile: "", business: a.business, bio: a.bio, profileImage: a.profileImage, role: a.role, authMethod: a.authMethod, application: { status: "Approved", documents: [], submittedAt: "" } }))
   result[accountsKey] = JSON.stringify([...publicProfiles, ...(actor ? [actor] : [])])
@@ -366,9 +373,10 @@ export function visibleRecords() {
     for (const key of [keyFor("soundstage-schedule:", actor.email), `soundstage-event-notifications:${actor.role}:${actor.email.toLowerCase()}`]) if (storage.getItem(key)) result[key] = storage.getItem(key)!
     for (const key of ["soundstage-booking-messages-v1", "soundstage-provider-reports-v1"]) result[key] = JSON.stringify(JSON.parse(storage.getItem(key) || "[]").filter((v: { bookingId: string }) => permittedIds.has(v.bookingId)))
     if (actor.role === "payroll_master") result["soundstage-provider-reports-v1"] = storage.getItem("soundstage-provider-reports-v1") || "[]"
-    result["soundstage-withdrawals-v1"] = JSON.stringify(withdrawals.getWithdrawalRequests().filter(w => w.providerEmail === actor.email))
+    const payroll = actor.role === "payroll_master"
+    result["soundstage-withdrawals-v1"] = JSON.stringify(withdrawals.getWithdrawalRequests().filter(w => payroll || w.providerEmail === actor.email))
     const state = JSON.parse(storage.getItem(billingKey) || '{"subscriptions":[],"payments":[],"audit":[]}')
-    result[billingKey] = JSON.stringify({ subscriptions: state.subscriptions.filter((s: { email: string }) => s.email === actor.email.toLowerCase()), payments: state.payments.filter((p: { email: string }) => p.email === actor.email.toLowerCase()), audit: [] })
+    result[billingKey] = payroll ? JSON.stringify(state) : JSON.stringify({ subscriptions: state.subscriptions.filter((s: { email: string }) => s.email === actor.email.toLowerCase()), payments: state.payments.filter((p: { email: string }) => p.email === actor.email.toLowerCase()), audit: [] })
   }
   return result
 }
