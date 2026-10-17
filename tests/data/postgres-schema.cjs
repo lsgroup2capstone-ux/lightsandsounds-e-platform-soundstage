@@ -4,7 +4,7 @@ const { readFileSync } = require('node:fs')
 const { PGlite } = require('@electric-sql/pglite')
 const path = require('node:path')
 test('PostgreSQL migration is repeatable, preserves records and denies browser roles', async () => {
-  const db = new PGlite()
+  const db = new PGlite({ extensions: { btree_gist: require('@electric-sql/pglite/contrib/btree_gist').btree_gist } })
   try {
     await db.exec('CREATE ROLE anon; CREATE ROLE authenticated; CREATE SCHEMA auth; CREATE TABLE auth.users(id uuid PRIMARY KEY);')
     const schema = readFileSync('database/schema.sql', 'utf8')
@@ -13,7 +13,7 @@ test('PostgreSQL migration is repeatable, preserves records and denies browser r
     await db.exec(schema)
     const result = await db.query('SELECT value FROM soundstage.records WHERE key=$1', ['soundstage-test'])
     assert.equal(result.rows[0].value.nested.amount, 123)
-    assert.equal((await db.query('SELECT count(*)::int AS count FROM soundstage.schema_versions')).rows[0].count, 4)
+    assert.equal((await db.query('SELECT count(*)::int AS count FROM soundstage.schema_versions')).rows[0].count, 5)
     await assert.rejects(db.query('INSERT INTO soundstage.records(key,value) VALUES ($1,$2)', ['invalid', {}]), /check constraint/)
     await assert.rejects(db.query('INSERT INTO soundstage.identities(auth_id,email,role) VALUES ($1,$2,$3)', ['00000000-0000-0000-0000-000000000001', 'a@test.com', 'admin']), /foreign key/)
     await db.exec('SET ROLE anon')
@@ -28,7 +28,7 @@ test('PostgreSQL migration is repeatable, preserves records and denies browser r
 })
 
 test('full server workflows persist in PostgreSQL and roll back conflicting writes', async () => {
-  const db = new PGlite()
+  const db = new PGlite({ extensions: { btree_gist: require('@electric-sql/pglite/contrib/btree_gist').btree_gist } })
   const tag = connection => {
     const query = async (parts, ...values) => (await connection.query(parts.reduce((sql, part, i) => sql + (i ? '$' + i : '') + part, ''), values)).rows
     query.json = value => JSON.stringify(value)
@@ -110,4 +110,36 @@ test('full server workflows persist in PostgreSQL and roll back conflicting writ
     assert.equal(JSON.parse((await execute(promoted)).session['soundstage-session']).role, 'admin')
     await assert.rejects(execute(outsider), /revoked/)
   } finally { delete process.env.ENABLE_DEMO_PAYMENTS; await db.close() }
+})
+
+test('booking schema enforces statuses, no overlap, append-only history and immutable snapshots', async () => {
+  const db = new PGlite({ extensions: { btree_gist: require('@electric-sql/pglite/contrib/btree_gist').btree_gist } })
+  try {
+    await db.exec('CREATE ROLE anon; CREATE ROLE authenticated; CREATE SCHEMA auth; CREATE TABLE auth.users(id uuid PRIMARY KEY);')
+    const schema = readFileSync('database/schema.sql', 'utf8')
+    await db.exec(schema)
+    await db.exec(schema)
+    const tables = ['bookings', 'booking_status_history', 'availability_schedules', 'reschedule_requests', 'cancellation_requests']
+    for (const table of tables) assert.equal((await db.query('SELECT to_regclass($1) IS NOT NULL AS ok', ['soundstage.' + table])).rows[0].ok, true)
+    const insert = (provider, status, start, end) => db.query("INSERT INTO soundstage.bookings(client_email,provider_email,package_name,package_price,start_date,end_date,status) VALUES ('c@test.com',$1,'Pkg',1000,$2,$3,$4) RETURNING id", [provider, start, end, status])
+    await assert.rejects(insert('p@test.com', 'paid', '2026-11-01', '2026-11-02'), /check constraint/)
+    const first = (await insert('p@test.com', 'confirmed', '2026-11-01', '2026-11-03')).rows[0].id
+    await assert.rejects(insert('p@test.com', 'confirmed', '2026-11-02', '2026-11-04'), error => error.code === '23P01')
+    await assert.rejects(insert('p@test.com', 'in_progress', '2026-11-01', '2026-11-02'), error => error.code === '23P01')
+    await insert('p@test.com', 'confirmed', '2026-11-03', '2026-11-04')
+    await insert('other@test.com', 'confirmed', '2026-11-01', '2026-11-03')
+    await insert('p@test.com', 'pending', '2026-11-01', '2026-11-03')
+    await db.query("INSERT INTO soundstage.booking_status_history(booking_id,new_status,actor_role) VALUES ($1,'confirmed','system')", [first])
+    await assert.rejects(db.query("UPDATE soundstage.booking_status_history SET reason='x'"), /append-only/)
+    await assert.rejects(db.query('DELETE FROM soundstage.booking_status_history'), /append-only/)
+    await assert.rejects(db.query('UPDATE soundstage.bookings SET package_price=1 WHERE id=$1', [first]), /immutable/)
+    await db.query("UPDATE soundstage.bookings SET status='completed' WHERE id=$1", [first])
+    await db.query("INSERT INTO soundstage.cancellation_requests(booking_id,requested_by) VALUES ($1,'c@test.com')", [first])
+    await assert.rejects(db.query("INSERT INTO soundstage.cancellation_requests(booking_id,requested_by) VALUES ($1,'c@test.com')", [first]), /duplicate key/)
+    for (const role of ['anon', 'authenticated']) {
+      await db.exec('SET ROLE ' + role)
+      for (const table of tables) await assert.rejects(db.query('SELECT * FROM soundstage.' + table), /permission denied/)
+      await db.exec('RESET ROLE')
+    }
+  } finally { await db.close() }
 })

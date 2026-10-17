@@ -1,7 +1,16 @@
 import { AsyncLocalStorage } from "node:async_hooks"
 import { MemoryStorage } from "../data/memory-storage"
 
-export const context = new AsyncLocalStorage<{ storage: MemoryStorage; session: MemoryStorage; pendingDeletes?: string[] }>()
+// Minimal tagged-template shape shared by postgres.js transactions and the PGlite test adapter.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type Tx = <T = any[]>(strings: TemplateStringsArray, ...values: unknown[]) => Promise<T>
+export const context = new AsyncLocalStorage<{ storage: MemoryStorage; session: MemoryStorage; pendingDeletes?: string[]; tx?: Tx }>()
+// Booking writes share the request's transaction so status and history commit together.
+export function currentTx(): Tx {
+  const tx = context.getStore()?.tx
+  if (!tx) throw new Error("Database operation requires a request transaction.")
+  return tx
+}
 function current(key: "storage" | "session") {
   const state = context.getStore()
   if (!state) throw new Error("Database operation requires a request context.")

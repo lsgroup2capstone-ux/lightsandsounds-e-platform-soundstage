@@ -10,7 +10,7 @@ function tag(connection) {
 }
 
 async function setup() {
-  const db = new PGlite()
+  const db = new PGlite({ extensions: { btree_gist: require('@electric-sql/pglite/contrib/btree_gist').btree_gist } })
   await db.exec('CREATE ROLE anon; CREATE ROLE authenticated; CREATE SCHEMA auth; CREATE TABLE auth.users(id uuid PRIMARY KEY);')
   await db.exec(readFileSync('database/schema.sql', 'utf8'))
   const roles = [['00000000-0000-0000-0000-000000000001', 'admin@example.com', 'admin'], ['00000000-0000-0000-0000-000000000002', 'client@example.com', 'client'], ['00000000-0000-0000-0000-000000000003', 'provider@example.com', 'provider']]

@@ -7,7 +7,7 @@ lines to `archive/YYYY-MM.md` at the start of each month.
 | --- | --- | --- | --- | --- | --- |
 | [20261007-standalone-frontend-copy](../features/20261007-standalone-frontend-copy/) | in-progress (plan 3 of 5) | 3 of 5 | implementer | 2026-10-07 | plans 1-2 typecheck/build pass; SDD doctor has 2 pre-existing mirror failures |
 | [20261009-role-based-access](../features/20261009-role-based-access/) | done (4 of 4 shipped) | - | user | 2026-10-13 | full 93/93 and typecheck pass; outstanding: user runs auth:profiles dry run, then --execute, plus migrated-login manual checks |
-| [20261009-booking-schedule](../features/20261009-booking-schedule/) | plan-approved (5 plans, with payments) | 1 of 5 | implementer | 2026-10-13 | next: implement booking plan 1; order in prompts.md |
+| [20261009-booking-schedule](../features/20261009-booking-schedule/) | in-progress (plans 1-3 of 5 shipped) | 4 of 5 | implementer | 2026-10-17 | review-3 pass (minors M1-M3 for plan 4); npm test 125/126 (known system-activity), typecheck pass; plan 4 blocked on paymongo-payments plans 1-2 |
 | [20261009-paymongo-payments](../features/20261009-paymongo-payments/) | plan-approved (2 plans) | - | implementer | 2026-10-13 | runs after booking plans 1-3, before booking plan 4 |
 | [20261009-refund-module](../features/20261009-refund-module/) | spec-approved | - | planner | 2026-10-09 | plan after booking-schedule and payments |
 | [20261009-provider-payouts](../features/20261009-provider-payouts/) | spec-approved | - | planner | 2026-10-09 | plan after refund-module |

@@ -9,7 +9,7 @@ function tag(connection) {
 }
 
 async function setup() {
-  const db = new PGlite()
+  const db = new PGlite({ extensions: { btree_gist: require('@electric-sql/pglite/contrib/btree_gist').btree_gist } })
   await db.exec('CREATE ROLE anon; CREATE ROLE authenticated; CREATE SCHEMA auth; CREATE TABLE auth.users(id uuid PRIMARY KEY);')
   await db.exec(readFileSync('database/schema.sql', 'utf8'))
   await db.query('INSERT INTO soundstage.profiles(clerk_user_id,email,role) VALUES ($1,$2,$3)', ['user_role_set', 'operator@example.com', 'client'])

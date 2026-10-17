@@ -6,7 +6,7 @@ const { PGlite } = require('@electric-sql/pglite')
 
 test('backup round trip is admin-only, verified, atomic and preserves sign-in identities', async () => {
   process.env.BACKUP_SIGNING_SECRET = 'test-only-backup-signing-key'
-  const db = new PGlite()
+  const db = new PGlite({ extensions: { btree_gist: require('@electric-sql/pglite/contrib/btree_gist').btree_gist } })
   const tag = connection => {
     const query = async (parts, ...values) => (await connection.query(parts.reduce((sql, part, i) => sql + (i ? '$' + i : '') + part, ''), values)).rows
     query.json = value => JSON.stringify(value)

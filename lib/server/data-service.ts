@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js"
 import type { AppIdentity } from "./auth/clerk-auth"
 import { getDatabase } from "./db/database"
 import { MemoryStorage } from "../data/memory-storage"
-import { context, storage, session, queueDelete } from "./runtime"
+import { context, storage, session, queueDelete, type Tx } from "./runtime"
 import * as auth from "./domain/client-auth"
 import * as bookings from "./domain/client-bookings"
 import * as services from "./domain/provider-services"
@@ -407,7 +407,7 @@ export async function execute(user: AppIdentity | null, action?: string, args: u
     const rows = await tx<{ key: string; value: unknown }[]>`select key, value from soundstage.records`
     const originalValues = new Map(rows.map(r => [r.key, JSON.stringify(r.value)]))
     const values = Object.fromEntries(originalValues)
-    const state = { storage: new MemoryStorage(values), session: new MemoryStorage(), pendingDeletes }
+    const state = { storage: new MemoryStorage(values), session: new MemoryStorage(), pendingDeletes, tx: tx as unknown as Tx }
     return context.run(state, async () => {
       if (user) {
         const isClerk = user.authSource === "clerk"; let identity: { email: string; role: string }

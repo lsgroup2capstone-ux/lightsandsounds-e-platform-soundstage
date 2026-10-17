@@ -23,7 +23,7 @@ function identity(id, email) {
 }
 
 async function setup() {
-  const db = new PGlite()
+  const db = new PGlite({ extensions: { btree_gist: require('@electric-sql/pglite/contrib/btree_gist').btree_gist } })
   await db.exec('CREATE ROLE anon; CREATE ROLE authenticated; CREATE SCHEMA auth; CREATE TABLE auth.users(id uuid PRIMARY KEY);')
   await db.exec(readFileSync('database/schema.sql', 'utf8'))
   const mirrors = []

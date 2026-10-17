@@ -6,7 +6,7 @@ const { PGlite } = require('@electric-sql/pglite')
 const createLoader = require('../helpers/ts-loader.cjs')
 
 test('direct signup SMS pins phone, limits sends and attempts, expires codes, and prevents replay', async t => {
-  const db = new PGlite()
+  const db = new PGlite({ extensions: { btree_gist: require('@electric-sql/pglite/contrib/btree_gist').btree_gist } })
   const originalFetch = global.fetch
   const originalToken = process.env.PHILSMS_API_TOKEN, originalSender = process.env.PHILSMS_SENDER_ID
   const originalDemo = process.env.ENABLE_DEMO_OTP, originalNodeEnv = process.env.NODE_ENV

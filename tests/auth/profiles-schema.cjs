@@ -4,7 +4,7 @@ const { readFileSync } = require('node:fs')
 const { PGlite } = require('@electric-sql/pglite')
 
 test('profiles schema is constrained, repeatable, copied from Clerk mappings and private', async () => {
-  const db = new PGlite()
+  const db = new PGlite({ extensions: { btree_gist: require('@electric-sql/pglite/contrib/btree_gist').btree_gist } })
   try {
     await db.exec('CREATE ROLE anon; CREATE ROLE authenticated; CREATE SCHEMA auth; CREATE TABLE auth.users(id uuid PRIMARY KEY);')
     const schema = readFileSync('database/schema.sql', 'utf8')
@@ -25,7 +25,7 @@ test('profiles schema is constrained, repeatable, copied from Clerk mappings and
     assert.deepEqual((await db.query('SELECT clerk_id,email,role,created_at::text FROM soundstage.clerk_identities ORDER BY clerk_id')).rows, clerkSource)
     assert.deepEqual((await db.query('SELECT auth_id::text,email,role,created_at::text FROM soundstage.identities ORDER BY auth_id')).rows, supabaseSource)
     assert.equal((await db.query('SELECT count(*)::int AS count FROM soundstage.profiles')).rows[0].count, 1)
-    assert.equal((await db.query('SELECT count(*)::int AS count FROM soundstage.schema_versions')).rows[0].count, 4)
+    assert.equal((await db.query('SELECT count(*)::int AS count FROM soundstage.schema_versions')).rows[0].count, 5)
 
     await assert.rejects(db.query('INSERT INTO soundstage.profiles(clerk_user_id,email,role) VALUES ($1,$2,$3)', ['bad-id', 'lower@example.com', 'client']), /check constraint/)
     await assert.rejects(db.query('INSERT INTO soundstage.profiles(clerk_user_id,email,role) VALUES ($1,$2,$3)', ['user_upper', 'Upper@example.com', 'client']), /check constraint/)
