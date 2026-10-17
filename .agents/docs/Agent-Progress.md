@@ -55,6 +55,6 @@ This page derives status from `.agents/state/tasks.md` and the feature folders. 
 ## Validation cautions
 
 - `npm run lint` is recorded as non-runnable because ESLint and a flat config are absent. See [[Bug-Tracker]].
-- `tests/system-activity.cjs` was reproduced failing on 2026-10-15: the test expects an Admin refund link while current code produces an Admin activity link. See [[Bug-Tracker]].
+- `tests/data/system-activity.cjs` was reproduced failing on 2026-10-15: the test expects an Admin refund link while current code produces an Admin activity link. See [[Bug-Tracker]].
 - Multiple features have pending browser, keyboard, Clerk, hosted Supabase, PayMongo, or R2 checks. A code review pass does not erase these explicit gaps.
 - The worktree was already dirty when this vault was created. Status descriptions include those current files but no existing feature artifact or application file was altered for the vault setup.

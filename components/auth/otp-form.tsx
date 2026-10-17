@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
 import { Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { verifyPasswordResetCode, verifyPendingAccount, resendVerification, requestPasswordReset } from "@/lib/client-auth"
+import { verifyPasswordResetCode, verifyPendingAccount, resendVerification, requestPasswordReset } from "@/lib/auth/client-auth"
 
 const LENGTH = 6
 

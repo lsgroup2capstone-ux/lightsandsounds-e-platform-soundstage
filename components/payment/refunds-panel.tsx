@@ -1,8 +1,8 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { getClientBookings, requestBookingRefund, reviewBookingRefund } from "@/lib/client-bookings"
-import { type Booking, formatPeso } from "@/lib/mock-data"
+import { getClientBookings, requestBookingRefund, reviewBookingRefund } from "@/lib/booking/client-bookings"
+import { type Booking, formatPeso } from "@/lib/marketplace/mock-data"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"

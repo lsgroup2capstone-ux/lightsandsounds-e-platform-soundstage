@@ -1,0 +1,46 @@
+const { readFileSync } = require('node:fs')
+const { transpileModule, ModuleKind, ScriptTarget } = require('typescript')
+const assert = require('node:assert/strict')
+const Module = require('node:module')
+const storage = () => { const values = new Map(); return { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key) } }
+global.localStorage = storage(); global.sessionStorage = storage(); global.window = { dispatchEvent() {} }
+const trials = [], audits = []
+const keysModule = new Module('file-keys-test')
+keysModule._compile(transpileModule(readFileSync('lib/server/storage/file-keys.ts', 'utf8'), { compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 } }).outputText, 'file-keys-test.js')
+const file = new Module('applications-test')
+file.require = name => name === '../storage/file-keys' ? keysModule.exports : name === "../runtime" ? { storage: global.localStorage, session: global.sessionStorage, events: global.window } : name === './marketplace-billing' ? { ensureProviderTrial: email => trials.push(email), migrateProviderBilling() {}, recordAdminAction: (...args) => audits.push(args), recordMarketplaceAction: (...args) => audits.push(args) } : require(name)
+file._compile(transpileModule(readFileSync('lib/server/domain/client-auth.ts', 'utf8'), { compilerOptions: { module: ModuleKind.CommonJS } }).outputText, 'applications-test.js')
+const auth = file.exports
+const documents = [{ name: 'permit.pdf', type: 'application/pdf', key: keysModule.exports.buildKey('provider-document', 'provider@example.com', '0123456789abcdef0123456789abcdef', 'application/pdf'), size: 1024 }]
+const account = { role: 'provider', email: 'provider@example.com', firstName: 'Test', lastName: 'Provider', business: 'Events', authMethod: 'email', application: { status: 'Pending', documents, submittedAt: new Date().toISOString() } }
+localStorage.setItem('soundstage-accounts-v2', JSON.stringify([account]))
+sessionStorage.setItem('soundstage-session', JSON.stringify({ role: account.role, email: account.email }))
+assert.equal(trials.length, 0)
+assert.equal(auth.isProviderApproved(account.email), false)
+assert.throws(() => auth.reviewProviderApplication(account.email, 'Approved', ''))
+assert.throws(() => auth.submitProviderApplication(documents))
+function admin() { localStorage.setItem('soundstage-admin-account', JSON.stringify({ role: 'admin', email: 'admin@example.com' })); sessionStorage.setItem('soundstage-session', JSON.stringify({ role: 'admin', email: 'admin@example.com' })) }
+admin()
+assert.throws(() => auth.reviewProviderApplication(account.email, 'Rejected', ''))
+auth.reviewProviderApplication(account.email, 'Rejected', 'Please send a clearer ID')
+assert.equal(trials.length, 0)
+sessionStorage.setItem('soundstage-session', JSON.stringify({ role: account.role, email: account.email }))
+assert.equal(auth.getAccount().application.reason, 'Please send a clearer ID')
+assert.throws(() => auth.submitProviderApplication([]))
+auth.submitProviderApplication(documents)
+assert.equal(auth.getAccount().application.status, 'Pending')
+admin()
+auth.reviewProviderApplication(account.email, 'Approved', 'Documents verified')
+assert.equal(auth.isProviderApproved(account.email), true)
+assert.equal(trials.length, 1)
+assert.throws(() => auth.reviewProviderApplication(account.email, 'Approved', 'Again'))
+assert.ok(audits.some(row => row[0] === 'Provider application reviewed'))
+sessionStorage.setItem('soundstage-session', JSON.stringify({ role: account.role, email: account.email }))
+assert.equal(auth.getAccount().application.documents[0].name, 'permit.pdf')
+const doc = documents[0]
+for (const bad of [{ ...doc, type: 'text/html' }, { ...doc, size: 0 }, { ...doc, size: 5 * 1024 * 1024 + 1 }, { ...doc, name: '' }, { ...doc, name: 'x'.repeat(201) }, { ...doc, data: 'data:application/pdf;base64,AA' }, { ...doc, key: 'data:application/pdf;base64,AA' }])
+  assert.throws(() => auth.validateProviderDocuments([bad], account.email))
+assert.throws(() => auth.validateProviderDocuments(documents, 'other@example.com'))
+assert.throws(() => auth.validateProviderDocuments([doc, doc, doc, doc, doc], account.email))
+auth.validateProviderDocuments(documents, account.email)
+console.log('Provider application checks passed: documents, pending signup, trial timing, admin authorization, rejection, resubmission, approval, duplicate review, Supabase identity and audit.')

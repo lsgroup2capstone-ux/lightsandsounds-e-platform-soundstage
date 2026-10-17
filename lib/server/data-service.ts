@@ -1,8 +1,8 @@
-import { createCheckout, paymongo, paymentKey } from "./paymongo"
+import { createCheckout, paymongo, paymentKey } from "./payments/paymongo"
 import { createClient } from "@supabase/supabase-js"
-import type { AppIdentity } from "./clerk-auth"
-import { getDatabase } from "./database"
-import { MemoryStorage } from "../memory-storage"
+import type { AppIdentity } from "./auth/clerk-auth"
+import { getDatabase } from "./db/database"
+import { MemoryStorage } from "../data/memory-storage"
 import { context, storage, session, queueDelete } from "./runtime"
 import * as auth from "./domain/client-auth"
 import * as bookings from "./domain/client-bookings"
@@ -10,17 +10,17 @@ import * as services from "./domain/provider-services"
 import * as billing from "./domain/marketplace-billing"
 import * as communications from "./domain/communications"
 import * as withdrawals from "./domain/withdrawals"
-import type { ClientAccount } from "../client-auth"
-import type { Booking } from "../mock-data"
-import { isAreaCovered, getTownDistance, getTransportationFee } from "../booking-pricing"
-import { importLegacyRecords } from "./legacy-import"
-import { createBackup, previewBackup, restoreBackup } from "./backup"
+import type { ClientAccount } from "../auth/client-auth"
+import type { Booking } from "../marketplace/mock-data"
+import { isAreaCovered, getTownDistance, getTransportationFee } from "../booking/booking-pricing"
+import { importLegacyRecords } from "./db/legacy-import"
+import { createBackup, previewBackup, restoreBackup } from "./db/backup"
 import { RequestError } from "./request-error"
-import { KIND_RULES, buildKey, isDataUrl, isFileKind, isOwnKey, type FileKind } from "./file-keys"
-import { deleteObject, headObject, presignGet, presignPut, publicBaseUrl } from "./r2"
-import { ensureProfile } from "./profiles"
-import { assertProviderActionAllowed } from "./provider-lock"
-import { SERVICE_RATINGS_KEY, buildServiceRatings } from "../service-ratings"
+import { KIND_RULES, buildKey, isDataUrl, isFileKind, isOwnKey, type FileKind } from "./storage/file-keys"
+import { deleteObject, headObject, presignGet, presignPut, publicBaseUrl } from "./storage/r2"
+import { ensureProfile } from "./auth/profiles"
+import { assertProviderActionAllowed } from "./auth/provider-lock"
+import { SERVICE_RATINGS_KEY, buildServiceRatings } from "../marketplace/service-ratings"
 
 export { RequestError }
 const accountsKey = "soundstage-accounts-v2"
@@ -387,7 +387,7 @@ export async function authenticate(request: Request, _options: { allowUnverified
   if (!header.startsWith("Bearer ")) throw new RequestError("Invalid session.", 401)
   if (request.headers.get("x-auth-provider") === "clerk") {
     if (!process.env.CLERK_SECRET_KEY || !process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) throw new RequestError("Sign-in is not configured.", 503)
-    try { return await (await import("./clerk-auth")).authenticateClerk(request) }
+    try { return await (await import("./auth/clerk-auth")).authenticateClerk(request) }
     catch { throw new RequestError("Session could not be verified. Please sign in again.", 401) }
   }
   const client = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!, { auth: { persistSession: false, autoRefreshToken: false } })

@@ -14,7 +14,7 @@ This roadmap combines the current task index with the proposed build-order ADR. 
 
 - [ ] Independently review [[Features/20261014-provider-browse]] and resolve any findings.
 - [ ] Independently review [[Features/20261014-service-ratings]] after confirming the shared browse dependency.
-- [ ] Reproduce and resolve or formally baseline the `tests/system-activity.cjs` failure in [[Bug-Tracker]].
+- [ ] Reproduce and resolve or formally baseline the `tests/data/system-activity.cjs` failure in [[Bug-Tracker]].
 - [ ] Run the pending browser checks for provider browse, service ratings, role navigation, and shipped Apple UI slices.
 - [ ] Ship [[Features/20261009-provider-module|Provider lock plan 1]] only after explicit user authorization and the required manual provider/admin checks.
 - [ ] Implement/review/ship [[Features/20261012-r2-file-storage|R2 plan 4]], including legacy base64 migration, orphan cleanup, and deployment notes.

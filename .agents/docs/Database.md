@@ -11,7 +11,7 @@ Related notes: [[Architecture]] · [[Modules]] · [[Dependencies]] · [[Decision
 
 ## Current schema
 
-The current executable schema is `database/schema.sql`. It is an idempotent PostgreSQL script applied by `scripts/database-init.cjs`; there is no `supabase/migrations/` directory in the inspected repository. The script records schema versions 1 through 4 but is maintained as one file rather than four separate migration files.
+The current executable schema is `database/schema.sql`. It is an idempotent PostgreSQL script applied by `scripts/db/database-init.cjs`; there is no `supabase/migrations/` directory in the inspected repository. The script records schema versions 1 through 4 but is maintained as one file rather than four separate migration files.
 
 | Table | Purpose | Key relationships | Current access controls |
 | --- | --- | --- | --- |
@@ -45,7 +45,7 @@ This is deliberate server-only access, not a collection of per-user RLS policies
 | `status` | `active`, `suspended`, or `deactivated` |
 | `created_at`, `updated_at` | Timestamps with current-time defaults |
 
-The schema copies existing `clerk_identities` rows into `profiles` with `ON CONFLICT DO NOTHING`. The one-off `scripts/migrate-identities-to-profiles.cjs` covers legacy Supabase users, but its hosted execution remains user-controlled.
+The schema copies existing `clerk_identities` rows into `profiles` with `ON CONFLICT DO NOTHING`. The one-off `scripts/auth/migrate-identities-to-profiles.cjs` covers legacy Supabase users, but its hosted execution remains user-controlled.
 
 ## JSON record collections
 
@@ -94,6 +94,6 @@ Repository scripts:
 
 - `npm run db:init` applies `database/schema.sql` to the configured database. This is a scoped external write and requires explicit authorization.
 - `npm run db:check` reads schema versions from the configured database.
-- `tests/postgres-schema.cjs` and `tests/profiles-schema.cjs` execute the schema against embedded PostgreSQL/PGlite.
+- `tests/data/postgres-schema.cjs` and `tests/auth/profiles-schema.cjs` execute the schema against embedded PostgreSQL/PGlite.
 
 Never copy connection strings, service keys, or values from `.env.local` into this vault.

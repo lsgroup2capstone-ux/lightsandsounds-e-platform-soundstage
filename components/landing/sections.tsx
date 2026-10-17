@@ -8,10 +8,10 @@ import {
   TrendingUp,
   Users,
 } from "lucide-react"
-import { PackageCard } from "@/components/site/package-card"
+import { PackageCard } from "@/components/marketplace/package-card"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
-import { packages } from "@/lib/mock-data"
+import { packages } from "@/lib/marketplace/mock-data"
 
 const steps = [
   {

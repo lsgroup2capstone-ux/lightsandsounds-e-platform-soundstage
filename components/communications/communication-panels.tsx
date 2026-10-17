@@ -6,10 +6,10 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import type { Booking } from "@/lib/mock-data"
-import { getAccount } from "@/lib/client-auth"
-import { getAllBookings } from "@/lib/client-bookings"
-import { getBookingMessages, getProviderReports, sendBookingMessage, submitProviderReport, updateProviderReportStatus, type BookingMessage, type ProviderReport } from "@/lib/communications"
+import type { Booking } from "@/lib/marketplace/mock-data"
+import { getAccount } from "@/lib/auth/client-auth"
+import { getAllBookings } from "@/lib/booking/client-bookings"
+import { getBookingMessages, getProviderReports, sendBookingMessage, submitProviderReport, updateProviderReportStatus, type BookingMessage, type ProviderReport } from "@/lib/communications/communications"
 
 export function MessagesPanel({ bookings, side }: { bookings: Booking[]; side: "client" | "provider" }) {
   const [selectedId, setSelectedId] = useState(bookings[0]?.id || "")

@@ -7,7 +7,7 @@ import { Eye, EyeOff, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { loginWithEmailAutomatically, loginWithGoogleAutomatically, verifyLoginCode } from "@/lib/client-auth"
+import { loginWithEmailAutomatically, loginWithGoogleAutomatically, verifyLoginCode } from "@/lib/auth/client-auth"
 export function LoginForm({ returnTo, resetSuccess = false }: { returnTo?: string; resetSuccess?: boolean }) {
   const router = useRouter()
   const signupHref = `/signup${returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : ""}`

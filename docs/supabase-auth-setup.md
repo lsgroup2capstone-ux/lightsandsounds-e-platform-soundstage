@@ -15,7 +15,7 @@ Supabase Auth now handles client, provider and administrator email/password logi
 
 ## Existing Clerk accounts
 
-Run `node scripts/migrate-clerk-to-supabase.cjs` for a read-only preflight, then add `--execute` to migrate. The script verifies each Clerk primary email and saved role before creating Supabase Auth accounts, uses the Auth Admin API, and links the new IDs to `soundstage.identities`. It is safe to rerun after a partial failure and refuses conflicting or administrator identities.
+Run `node scripts/auth/migrate-clerk-to-supabase.cjs` for a read-only preflight, then add `--execute` to migrate. The script verifies each Clerk primary email and saved role before creating Supabase Auth accounts, uses the Auth Admin API, and links the new IDs to `soundstage.identities`. It is safe to rerun after a partial failure and refuses conflicting or administrator identities.
 
 The migration does not send emails or copy passwords. Migrated users must use **Forgot password** with their existing email to set a Supabase password, or sign in with Google once that provider is configured. Existing Supabase users keep their passwords.
 

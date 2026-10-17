@@ -1,6 +1,6 @@
 import { clerkMiddleware } from "@clerk/nextjs/server"
 import { NextResponse, type NextRequest, type NextFetchEvent } from "next/server"
-import { ROLES, areaFor, canAccessPath, dashboardFor, type Role } from "@/lib/server/access-rules"
+import { ROLES, areaFor, canAccessPath, dashboardFor, type Role } from "@/lib/server/auth/access-rules"
 
 const unavailable = () => new NextResponse(
   '<p role="alert">Sign-in is temporarily unavailable. Please try again later.</p>',

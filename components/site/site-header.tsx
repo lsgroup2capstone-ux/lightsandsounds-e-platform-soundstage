@@ -5,8 +5,8 @@ import { useEffect, useState } from "react"
 import { Logo } from "@/components/site/logo"
 import { ThemeToggle } from "@/components/site/theme-toggle"
 import { Button } from "@/components/ui/button"
-import { getAccount, type ClientAccount } from "@/lib/client-auth"
-import { publicFileUrl } from "@/lib/file-upload"
+import { getAccount, type ClientAccount } from "@/lib/auth/client-auth"
+import { publicFileUrl } from "@/lib/data/file-upload"
 
 const nav = [
   { label: "Browse", href: "/browse" },

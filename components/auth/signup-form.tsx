@@ -8,10 +8,10 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
-import { loginWithGoogle, savePendingAccount } from "@/lib/client-auth"
+import { loginWithGoogle, savePendingAccount } from "@/lib/auth/client-auth"
 
 import { PasswordInput } from "@/components/auth/password-input"
-import { PASSWORD_REQUIREMENTS, validatePassword } from "@/lib/password-policy"
+import { PASSWORD_REQUIREMENTS, validatePassword } from "@/lib/auth/password-policy"
 
 type Role = "client" | "provider"
 

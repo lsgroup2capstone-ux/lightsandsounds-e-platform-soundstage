@@ -14,17 +14,17 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { type Booking, type ServicePackage, formatPeso } from "@/lib/mock-data"
-import { saveClientBooking } from "@/lib/client-bookings"
-import { openPaymentWindow } from "@/lib/payment-window"
-import { mutate } from "@/lib/app-store"
+import { type Booking, type ServicePackage, formatPeso } from "@/lib/marketplace/mock-data"
+import { saveClientBooking } from "@/lib/booking/client-bookings"
+import { openPaymentWindow } from "@/lib/booking/payment-window"
+import { mutate } from "@/lib/data/app-store"
 import { BookingDatePicker } from "@/components/booking/booking-date-picker"
 import { cn } from "@/lib/utils"
-import { getAccount } from "@/lib/client-auth"
+import { getAccount } from "@/lib/auth/client-auth"
 import { PaymentMethodPicker } from "@/components/payment/payment-method-picker"
 import { PaymentReceiptCard } from "@/components/payment/payment-receipt"
 
-import { isAreaCovered, getTownDistance, getTransportationTier, getTransportationFee } from "@/lib/booking-pricing"
+import { isAreaCovered, getTownDistance, getTransportationTier, getTransportationFee } from "@/lib/booking/booking-pricing"
 
 type Step = 1 | 2 | 3 | 4
 

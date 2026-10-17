@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { execute } from "@/lib/server/data-service"
-import { verifyWebhook } from "@/lib/server/paymongo"
+import { verifyWebhook } from "@/lib/server/payments/paymongo"
 
 export const runtime = "nodejs"
 export async function POST(request: Request) {

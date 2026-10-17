@@ -1,5 +1,5 @@
 import { Webhook } from "standardwebhooks"
-import { normalizePhilippineMobile } from "@/lib/phone"
+import { normalizePhilippineMobile } from "@/lib/auth/phone"
 
 export const runtime = "nodejs"
 

@@ -2,7 +2,7 @@ import { Analytics } from '@vercel/analytics/next'
 import type { Metadata, Viewport } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
-import { DataProvider } from '@/components/data-provider'
+import { DataProvider } from '@/components/state/data-provider'
 import { ClerkProvider } from '@clerk/nextjs'
 
 const inter = Inter({

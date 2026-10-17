@@ -1,5 +1,5 @@
 import { storage, session, events } from "../runtime"
-import { isOwnKey } from "../file-keys"
+import { isOwnKey } from "../storage/file-keys"
 import { ensureProviderTrial, migrateProviderBilling, recordAdminAction, recordMarketplaceAction } from "./marketplace-billing"
 export type ProviderDocument = { name: string; type: string; key: string; size: number }
 export type ProviderApplication = { status: "Pending" | "Approved" | "Rejected"; documents: ProviderDocument[]; submittedAt: string; reviewedAt?: string; reason?: string }

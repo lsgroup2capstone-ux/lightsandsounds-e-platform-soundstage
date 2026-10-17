@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks"
-import { MemoryStorage } from "../memory-storage"
+import { MemoryStorage } from "../data/memory-storage"
 
 export const context = new AsyncLocalStorage<{ storage: MemoryStorage; session: MemoryStorage; pendingDeletes?: string[] }>()
 function current(key: "storage" | "session") {

@@ -6,7 +6,7 @@ import { Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { PasswordInput } from "@/components/auth/password-input"
 import { Label } from "@/components/ui/label"
-import { completePasswordReset } from "@/lib/client-auth"
+import { completePasswordReset } from "@/lib/auth/client-auth"
 
 export function ResetPasswordForm() {
   const [loading, setLoading] = useState(false)

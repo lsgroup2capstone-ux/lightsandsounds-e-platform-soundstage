@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect } from "react"
-import { getClerkBrowser } from "@/lib/clerk-browser"
+import { getClerkBrowser } from "@/lib/auth/clerk-browser"
 
 export function AccessRefresh({ to }: { to: string }) {
   useEffect(() => {

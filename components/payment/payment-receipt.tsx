@@ -3,7 +3,7 @@
 import { Eye, ReceiptText } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-import { type Booking, formatPeso } from "@/lib/mock-data"
+import { type Booking, formatPeso } from "@/lib/marketplace/mock-data"
 
 export function PaymentReceiptCard({ booking }: { booking: Booking }) {
   const paidDate = booking.paidAt ? new Date(booking.paidAt).toLocaleString("en-PH", { dateStyle: "medium", timeStyle: "short" }) : "Payment recorded"

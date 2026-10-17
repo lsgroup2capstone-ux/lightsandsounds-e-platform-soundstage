@@ -1,17 +1,17 @@
 "use client"
 
 import { PaymentMethodPicker } from "@/components/payment/payment-method-picker"
-import { openPaymentWindow } from "@/lib/payment-window"
-import { mutate } from "@/lib/app-store"
+import { openPaymentWindow } from "@/lib/booking/payment-window"
+import { mutate } from "@/lib/data/app-store"
 import { useEffect, useState } from "react"
 import { Check } from "lucide-react"
-import { getAccount } from "@/lib/client-auth"
-import { ensureProviderTrial, getAuditEntries, getSubscriptionPayments, MARKETPLACE_EVENT, plans, reviewSubscriptionPayment, submitSubscriptionPayment, subscriptionStatus, type Subscription, type SubscriptionPayment } from "@/lib/marketplace-billing"
+import { getAccount } from "@/lib/auth/client-auth"
+import { ensureProviderTrial, getAuditEntries, getSubscriptionPayments, MARKETPLACE_EVENT, plans, reviewSubscriptionPayment, submitSubscriptionPayment, subscriptionStatus, type Subscription, type SubscriptionPayment } from "@/lib/payments/marketplace-billing"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-import { peso } from "@/lib/hub-data"
+import { peso } from "@/lib/data/hub-data"
 
 function useBillingRefresh() {
   const [version, setVersion] = useState(0)

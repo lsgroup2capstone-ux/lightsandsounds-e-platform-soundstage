@@ -10,4 +10,4 @@ The server signs backups with `BACKUP_SIGNING_SECRET`, falling back to the exist
 
 The app rejects exports whose restore request would exceed 11 MB; uploads are capped at 11 MB. Larger datasets require infrastructure backup tools. Backups are manual downloads; no schedule or off-site retention is configured by this feature.
 
-Run `node --test tests/backup.cjs` to exercise an actual local PostgreSQL-compatible database round trip, access control, tamper rejection, rollback, and identity preservation.
+Run `node --test tests/data/backup.cjs` to exercise an actual local PostgreSQL-compatible database round trip, access control, tamper rejection, rollback, and identity preservation.

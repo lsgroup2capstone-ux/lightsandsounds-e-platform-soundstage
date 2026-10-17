@@ -54,9 +54,9 @@ The mobile number cannot be edited on the OTP screen or changed by passing a pho
 | File | Purpose |
 | --- | --- |
 | `app/api/auth/signup-sms/route.ts` | Authenticated status, send, and verify endpoints. |
-| `lib/server/signup-sms.ts` | Fixed phone, code generation, HMAC verification, expiry, rate limits, and PhilSMS delivery. |
+| `lib/server/auth/signup-sms.ts` | Fixed phone, code generation, HMAC verification, expiry, rate limits, and PhilSMS delivery. |
 | `database/schema.sql` | Private verification table, RLS, and privileges. |
-| `lib/client-auth.ts` | Signup and interrupted-signup recovery. |
+| `lib/auth/client-auth.ts` | Signup and interrupted-signup recovery. |
 | `components/auth/otp-form.tsx` | Read-only phone, code entry, resend, and countdown. |
 | `lib/server/data-service.ts` | Server-side account access check. |
 

@@ -1,5 +1,5 @@
 import { storage, session, events } from "../runtime"
-import type { Booking } from "@/lib/mock-data"
+import type { Booking } from "@/lib/marketplace/mock-data"
 import { getAccount } from "./client-auth"
 import { recordMarketplaceAction, recordAdminAction } from "./marketplace-billing"
 

@@ -1,5 +1,5 @@
 import { authenticate, RequestError } from "@/lib/server/data-service"
-import { sendSignupSms, signupPhoneStatus, verifySignupSms, SmsVerificationError } from "@/lib/server/signup-sms"
+import { sendSignupSms, signupPhoneStatus, verifySignupSms, SmsVerificationError } from "@/lib/server/auth/signup-sms"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"

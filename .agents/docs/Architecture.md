@@ -14,10 +14,10 @@ Related notes: [[Home]] · [[Database]] · [[Modules]] · [[Dependencies]] · [[
 | --- | --- | --- |
 | Web application | Next.js 16.3 App Router, React 19, TypeScript 5.7 strict mode | `package.json`, `tsconfig.json`, `app/` |
 | UI | Tailwind CSS 4, local shadcn-style primitives, Base UI, Lucide icons | `app/globals.css`, `components/ui/`, `components.json` |
-| Authentication | Clerk for protected role routes; transitional Supabase Auth code remains for legacy/API flows | `proxy.ts`, `lib/server/access.ts`, `lib/server/data-service.ts` |
-| Database | Supabase-hosted PostgreSQL accessed through the `postgres` driver from server code | `lib/server/database.ts`, `database/schema.sql` |
-| File storage | Cloudflare R2 through S3-compatible signed URLs | `lib/server/r2.ts`, `lib/server/file-keys.ts` |
-| Payments | PayMongo checkout sessions and a signed webhook; current records still use JSON storage | `lib/server/paymongo.ts`, `app/api/paymongo/webhook/route.ts` |
+| Authentication | Clerk for protected role routes; transitional Supabase Auth code remains for legacy/API flows | `proxy.ts`, `lib/server/auth/access.ts`, `lib/server/data-service.ts` |
+| Database | Supabase-hosted PostgreSQL accessed through the `postgres` driver from server code | `lib/server/db/database.ts`, `database/schema.sql` |
+| File storage | Cloudflare R2 through S3-compatible signed URLs | `lib/server/storage/r2.ts`, `lib/server/storage/file-keys.ts` |
+| Payments | PayMongo checkout sessions and a signed webhook; current records still use JSON storage | `lib/server/payments/paymongo.ts`, `app/api/paymongo/webhook/route.ts` |
 | Messaging | Gmail SMTP for signed email hooks; PhilSMS for signed SMS hooks | `app/api/auth/send-email/route.ts`, `app/api/auth/send-sms/route.ts` |
 | Analytics | Vercel Analytics in production | `app/layout.tsx` |
 
@@ -56,7 +56,7 @@ flowchart LR
 ### Access control
 
 1. `proxy.ts` checks whether a route belongs to a protected area and uses Clerk session claims for a fast redirect.
-2. Each protected layout calls `requireRole` in `lib/server/access.ts`.
+2. Each protected layout calls `requireRole` in `lib/server/auth/access.ts`.
 3. The layout reads `soundstage.profiles`; the database role and account status win over a stale Clerk claim.
 4. Browser API requests carry either a Supabase access token or Clerk bearer token to `/api/data`.
 5. `lib/server/data-service.ts` authenticates again, restricts the operation to the `actions` allowlist, and applies role/ownership rules.
@@ -66,7 +66,7 @@ Client-side visibility is not treated as an authorization boundary. See [[Decisi
 ### Current data flow
 
 - `DataProvider` refreshes the authorized snapshot on load, browser focus, and every 30 seconds while visible.
-- `lib/app-store.ts` serializes browser writes through `/api/data` and stores the returned snapshot in memory.
+- `lib/data/app-store.ts` serializes browser writes through `/api/data` and stores the returned snapshot in memory.
 - The API opens a transaction, takes advisory lock `74832019`, loads every row from `soundstage.records` into `MemoryStorage`, runs one allowlisted domain action, and upserts changed JSON values.
 - `visibleRecords()` filters the response by role and ownership. Public visitors receive approved provider/profile data, active services, and a sanitized ratings record.
 - R2 object deletion happens after the database commit; failures are logged for cleanup rather than rolling back the committed business change.

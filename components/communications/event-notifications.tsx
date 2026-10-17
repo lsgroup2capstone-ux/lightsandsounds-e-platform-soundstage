@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from "react"
 import { Bell } from "lucide-react"
-import { appStorage, mutate } from "@/lib/app-store"
-import { getAccount } from "@/lib/client-auth"
-import { getClientBookings } from "@/lib/client-bookings"
-import type { Booking } from "@/lib/mock-data"
+import { appStorage, mutate } from "@/lib/data/app-store"
+import { getAccount } from "@/lib/auth/client-auth"
+import { getClientBookings } from "@/lib/booking/client-bookings"
+import type { Booking } from "@/lib/marketplace/mock-data"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 
