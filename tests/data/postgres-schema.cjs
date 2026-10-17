@@ -23,7 +23,16 @@ test('PostgreSQL migration is repeatable, preserves records and denies browser r
     await assert.rejects(db.query('SELECT * FROM soundstage.clerk_identities'), /permission denied/)
     await assert.rejects(db.query('SELECT * FROM soundstage.profiles'), /permission denied/)
     await assert.rejects(db.query('SELECT * FROM soundstage.signup_phone_verifications'), /permission denied/)
+    await assert.rejects(db.query('SELECT * FROM soundstage.payments'), /permission denied/)
+    await assert.rejects(db.query('SELECT * FROM soundstage.payment_events'), /permission denied/)
     await db.exec('RESET ROLE')
+    // One open checkout per target and type (payments D12).
+    const pay = "INSERT INTO soundstage.payments (target_kind, target_id, owner_email, type, amount) VALUES ('booking', 'b1', 'c@test.com', 'downpayment', 100)"
+    await db.query(pay)
+    await assert.rejects(db.query(pay), /duplicate key/)
+    await db.query("UPDATE soundstage.payments SET status = 'failed'")
+    await db.query(pay)
+    await assert.rejects(db.query("INSERT INTO soundstage.payments (target_kind, target_id, owner_email, type, amount, status) VALUES ('booking', 'b2', 'c@test.com', 'full', 100, 'settled')"), /check constraint/)
   } finally { await db.close() }
 })
 

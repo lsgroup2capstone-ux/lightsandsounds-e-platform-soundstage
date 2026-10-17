@@ -177,6 +177,38 @@ END $$;
 DROP TRIGGER IF EXISTS bookings_snapshot_immutable ON soundstage.bookings;
 CREATE TRIGGER bookings_snapshot_immutable BEFORE UPDATE ON soundstage.bookings
   FOR EACH ROW EXECUTE FUNCTION soundstage.booking_snapshot_immutable();
+CREATE TABLE IF NOT EXISTS soundstage.payments (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  target_kind text NOT NULL CHECK (target_kind IN ('booking', 'subscription')),
+  target_id text NOT NULL,
+  owner_email text NOT NULL CHECK (owner_email = lower(owner_email)),
+  type text NOT NULL CHECK (type IN ('downpayment', 'full', 'balance', 'subscription')),
+  plan text,
+  amount numeric(12,2) NOT NULL CHECK (amount > 0),
+  refunded_amount numeric(12,2) NOT NULL DEFAULT 0 CHECK (refunded_amount >= 0),
+  currency text NOT NULL DEFAULT 'PHP' CHECK (currency = 'PHP'),
+  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'paid', 'failed', 'expired', 'review', 'partially_refunded', 'refunded')),
+  checkout_session_id text UNIQUE,
+  checkout_url text,
+  method text,
+  provider_reference text,
+  review_reason text,
+  legacy_id text UNIQUE,
+  paid_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS payments_one_pending ON soundstage.payments(target_id, type) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS payments_target_idx ON soundstage.payments(target_id);
+CREATE INDEX IF NOT EXISTS payments_owner_idx ON soundstage.payments(owner_email);
+ALTER TABLE soundstage.payments ENABLE ROW LEVEL SECURITY;
+CREATE TABLE IF NOT EXISTS soundstage.payment_events (
+  id text PRIMARY KEY,
+  type text NOT NULL,
+  payment_id uuid REFERENCES soundstage.payments(id) ON DELETE RESTRICT,
+  received_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE soundstage.payment_events ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON ALL TABLES IN SCHEMA soundstage FROM PUBLIC, anon, authenticated;
 ALTER DEFAULT PRIVILEGES IN SCHEMA soundstage REVOKE ALL ON TABLES FROM PUBLIC, anon, authenticated;
 INSERT INTO soundstage.schema_versions(version) VALUES (1) ON CONFLICT DO NOTHING;

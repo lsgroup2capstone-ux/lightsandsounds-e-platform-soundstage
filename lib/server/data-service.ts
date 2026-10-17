@@ -16,6 +16,7 @@ import { isAreaCovered, getTownDistance, getTransportationFee } from "../booking
 import { importLegacyRecords } from "./db/legacy-import"
 import { createBackup, previewBackup, restoreBackup } from "./db/backup"
 import { RequestError } from "./request-error"
+import "./payments/ledger"
 import { KIND_RULES, buildKey, isDataUrl, isFileKind, isOwnKey, type FileKind } from "./storage/file-keys"
 import { deleteObject, headObject, presignGet, presignPut, publicBaseUrl } from "./storage/r2"
 import { ensureProfile } from "./auth/profiles"
@@ -115,6 +116,17 @@ async function startPayment(email: string, id: string, name: string, amount: num
   storage.setItem(paymentPrefix + id, JSON.stringify({ id, email: email.toLowerCase(), amount, sessionId: checkout.id, checkoutUrl: url.href, kind, plan } satisfies PaymentRecord))
   return { id, checkoutUrl: url.href }
 }
+// Shared by the legacy settlement and the verified webhook (payments AC19).
+export function activateSubscription(payment: { id: string; email: string; plan?: string | null; amount: number; method: string; reference: string }) {
+  const at = new Date().toISOString()
+  const state = JSON.parse(storage.getItem(billingKey) || '{"subscriptions":[],"payments":[],"audit":[]}')
+  const subscription = state.subscriptions.find((s: billing.Subscription) => s.email === payment.email)
+  if (!subscription) throw new RequestError("Subscription not found.")
+  subscription.plan = payment.plan
+  subscription.paidUntil = new Date(Math.max(Date.now(), Date.parse(subscription.paidUntil || subscription.trialEnd)) + 30 * 86400000).toISOString()
+  state.payments.unshift({ id: payment.id, email: payment.email, customer: payment.email, plan: payment.plan, amount: payment.amount, method: payment.method, reference: payment.reference, status: "Paid", createdAt: at, paidAt: at, invoice: `SI-${payment.id}` })
+  storage.setItem(billingKey, JSON.stringify(state))
+}
 async function settlePayment(payment: PaymentRecord) {
   if (payment.paid) return { paid: true, kind: payment.kind }
   const checkout = await paymongo("/" + encodeURIComponent(payment.sessionId))
@@ -143,15 +155,7 @@ async function settlePayment(payment: PaymentRecord) {
     if (!booking) throw new RequestError("Booking not found.")
     booking.paid = true; booking.paidAt = at; booking.paymentMethod = method
     storage.setItem(key, JSON.stringify(items))
-  } else {
-    const state = JSON.parse(storage.getItem(billingKey) || '{"subscriptions":[],"payments":[],"audit":[]}')
-    const subscription = state.subscriptions.find((s: billing.Subscription) => s.email === payment.email)
-    if (!subscription) throw new RequestError("Subscription not found.")
-    subscription.plan = payment.plan
-    subscription.paidUntil = new Date(Math.max(Date.now(), Date.parse(subscription.paidUntil || subscription.trialEnd)) + 30 * 86400000).toISOString()
-    state.payments.unshift({ id: payment.id, email: payment.email, customer: payment.email, plan: payment.plan, amount: payment.amount, method, reference: paid.id, status: "Paid", createdAt: at, paidAt: at, invoice: `SI-${payment.id}` })
-    storage.setItem(billingKey, JSON.stringify(state))
-  }
+  } else activateSubscription({ id: payment.id, email: payment.email, plan: payment.plan, amount: payment.amount, method, reference: paid.id })
   payment.paid = true
   storage.setItem(paymentPrefix + payment.id, JSON.stringify(payment))
   return { paid: true, kind: payment.kind }
@@ -396,7 +400,7 @@ export async function authenticate(request: Request, _options: { allowUnverified
   return user
 }
 
-export async function execute(user: AppIdentity | null, action?: string, args: unknown[] = [], signupRole?: string, webhookSession?: string) {
+export async function execute(user: AppIdentity | null, action?: string, args: unknown[] = [], signupRole?: string, webhook?: () => Promise<unknown>) {
   if (action && !user) throw new RequestError("Sign in to continue.", 401)
   if (action && !Object.hasOwn(actions, action)) throw new RequestError("Unknown operation.", 404)
   const sql = getDatabase()
@@ -446,11 +450,8 @@ export async function execute(user: AppIdentity | null, action?: string, args: u
         assertProviderActionAllowed(identity.role, auth.isProviderApproved(identity.email), action, args)
       }
       let result = action ? await actions[action](...args) : null
-      if (webhookSession) {
-        const payment = Object.entries(storage.values).filter(([key]) => key.startsWith(paymentPrefix)).map(([, raw]) => JSON.parse(raw) as PaymentRecord).find(p => p.sessionId === webhookSession)
-        if (!payment) throw new RequestError("Payment record is not ready.", 503)
-        result = await settlePayment(payment)
-      }
+      // Verified PayMongo events run server-side in this same transaction; never a browser action.
+      if (webhook) result = await webhook()
       for (const [key, value] of Object.entries(storage.values)) {
         if (key === "soundstage-admin-account") continue
         if (originalValues.get(key) !== value) await tx`insert into soundstage.records (key,value) values (${key},${tx.json(JSON.parse(value))}) on conflict (key) do update set value=excluded.value, updated_at=now()`
