@@ -5,8 +5,8 @@ async function main() {
   const { url, options } = databaseConfig()
   const sql = postgres(url, options)
   try {
-    const counts = await sql`select role, count(*)::int as count from soundstage.clerk_identities group by role`
-    const profiles = await sql`select jsonb_array_length(value) as count from soundstage.records where key='soundstage-accounts-v2'`
+    const counts = await sql`select role, count(*)::int as count, count(clerk_user_id)::int as signed_in from soundstage.users group by role`
+    const profiles = counts
     const response = await fetch(process.env.NEXT_PUBLIC_SUPABASE_URL + '/auth/v1/settings', { headers: { apikey: process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY } })
     if (!response.ok) throw new Error('Auth settings request failed')
     const settings = await response.json()

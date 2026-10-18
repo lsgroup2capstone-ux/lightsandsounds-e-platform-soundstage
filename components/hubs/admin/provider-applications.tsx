@@ -43,10 +43,10 @@ function ApplicationForm({ busy, onSubmit }: { busy: boolean; onSubmit: (files: 
   const [permit, setPermit] = useState<File[]>([])
   const [id, setId] = useState<File[]>([])
   const [tried, setTried] = useState(false)
-  return <form className="space-y-3" noValidate onSubmit={event => { event.preventDefault(); setTried(true); if (!permit.length || !id.length) return; onSubmit([...permit, ...id]) }}>
+  return <form className="space-y-3" noValidate onSubmit={event => { event.preventDefault(); setTried(true); if (!permit.length || !id.length) return; onSubmit([permit[0], id[0]]) }}>
     <DropZone label="Business permit / DTI registration" files={permit} onChange={setPermit} invalid={tried && !permit.length} />
     <DropZone label="Valid ID" files={id} onChange={setId} invalid={tried && !id.length} />
-    <p className="text-xs text-muted-foreground">Both documents are required. Up to 4 PDF, JPG or PNG files in total, 5 MB each.</p>
+    <p className="text-xs text-muted-foreground">Both documents are required: one PDF, JPG or PNG file each, up to 5 MB.</p>
     <Button disabled={busy || !permit.length || !id.length} type="submit">{busy ? "Submitting..." : "Submit documents for review"}</Button>
   </form>
 }

@@ -3,36 +3,29 @@ const assert = require('node:assert/strict')
 const { readFileSync } = require('node:fs')
 const { PGlite } = require('@electric-sql/pglite')
 const path = require('node:path')
-test('PostgreSQL migration is repeatable, preserves records and denies browser roles', async () => {
+const CORE_TABLES = ['audit_log', 'bookings', 'feedback', 'messages', 'notifications', 'payments', 'refunds', 'schedules', 'service_packages', 'subscriptions', 'users']
+
+test('the schema creates exactly the 11 core tables, is repeatable, private and has no JSON columns', async () => {
   const db = new PGlite({ extensions: { btree_gist: require('@electric-sql/pglite/contrib/btree_gist').btree_gist } })
   try {
     await db.exec('CREATE ROLE anon; CREATE ROLE authenticated; CREATE SCHEMA auth; CREATE TABLE auth.users(id uuid PRIMARY KEY);')
     const schema = readFileSync('database/schema.sql', 'utf8')
     await db.exec(schema)
-    await db.query('INSERT INTO soundstage.records(key,value) VALUES ($1,$2)', ['soundstage-test', { nested: { amount: 123, status: 'Pending' } }])
+    await db.query("INSERT INTO soundstage.users(email,role) VALUES ('kept@test.com','client')")
     await db.exec(schema)
-    const result = await db.query('SELECT value FROM soundstage.records WHERE key=$1', ['soundstage-test'])
-    assert.equal(result.rows[0].value.nested.amount, 123)
-    assert.equal((await db.query('SELECT count(*)::int AS count FROM soundstage.schema_versions')).rows[0].count, 5)
-    await assert.rejects(db.query('INSERT INTO soundstage.records(key,value) VALUES ($1,$2)', ['invalid', {}]), /check constraint/)
-    await assert.rejects(db.query('INSERT INTO soundstage.identities(auth_id,email,role) VALUES ($1,$2,$3)', ['00000000-0000-0000-0000-000000000001', 'a@test.com', 'admin']), /foreign key/)
-    await db.exec('SET ROLE anon')
-    await assert.rejects(db.query('SELECT * FROM soundstage.records'), /permission denied/)
-    await db.exec('RESET ROLE; SET ROLE authenticated')
-    await assert.rejects(db.query('SELECT * FROM soundstage.identities'), /permission denied/)
-    await assert.rejects(db.query('SELECT * FROM soundstage.clerk_identities'), /permission denied/)
-    await assert.rejects(db.query('SELECT * FROM soundstage.profiles'), /permission denied/)
-    await assert.rejects(db.query('SELECT * FROM soundstage.signup_phone_verifications'), /permission denied/)
-    await assert.rejects(db.query('SELECT * FROM soundstage.payments'), /permission denied/)
-    await assert.rejects(db.query('SELECT * FROM soundstage.payment_events'), /permission denied/)
-    await db.exec('RESET ROLE')
-    // One open checkout per target and type (payments D12).
-    const pay = "INSERT INTO soundstage.payments (target_kind, target_id, owner_email, type, amount) VALUES ('booking', 'b1', 'c@test.com', 'downpayment', 100)"
-    await db.query(pay)
-    await assert.rejects(db.query(pay), /duplicate key/)
-    await db.query("UPDATE soundstage.payments SET status = 'failed'")
-    await db.query(pay)
-    await assert.rejects(db.query("INSERT INTO soundstage.payments (target_kind, target_id, owner_email, type, amount, status) VALUES ('booking', 'b2', 'c@test.com', 'full', 100, 'settled')"), /check constraint/)
+    assert.equal((await db.query('SELECT count(*)::int AS n FROM soundstage.users')).rows[0].n, 1)
+    assert.deepEqual((await db.query("SELECT tablename FROM pg_tables WHERE schemaname='soundstage' ORDER BY 1")).rows.map(r => r.tablename), CORE_TABLES)
+    assert.deepEqual((await db.query("SELECT table_name FROM information_schema.columns WHERE table_schema='soundstage' AND data_type IN ('json','jsonb')")).rows, [])
+    for (const role of ['anon', 'authenticated']) {
+      await db.exec('SET ROLE ' + role)
+      for (const table of CORE_TABLES) await assert.rejects(db.query('SELECT * FROM soundstage.' + table), /permission denied/, table)
+      await db.exec('RESET ROLE')
+    }
+    // Primary keys are numbers and every relationship is a foreign key.
+    const fks = (await db.query("SELECT tc.table_name, kcu.column_name FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage kcu ON kcu.constraint_name = tc.constraint_name WHERE tc.table_schema='soundstage' AND tc.constraint_type='FOREIGN KEY' ORDER BY 1, 2")).rows.map(r => r.table_name + '.' + r.column_name)
+    for (const fk of ['service_packages.provider_id', 'bookings.client_id', 'bookings.provider_id', 'bookings.package_id', 'schedules.provider_id', 'payments.booking_id', 'payments.subscription_id', 'payments.user_id',
+      'feedback.booking_id', 'feedback.client_id', 'feedback.provider_id', 'subscriptions.provider_id', 'messages.booking_id', 'messages.sender_id', 'refunds.booking_id', 'refunds.client_id', 'notifications.user_id', 'audit_log.user_id']) assert.ok(fks.includes(fk), fk)
+    await assert.rejects(db.query("INSERT INTO soundstage.service_packages(provider_id,name,price) VALUES (999,'x',1)"), /foreign key/)
   } finally { await db.close() }
 })
 
@@ -58,7 +51,8 @@ test('full server workflows persist in PostgreSQL and roll back conflicting writ
     const savedEnv = Object.fromEntries(Object.keys(r2Env).map(name => [name, process.env[name]])), realFetch = global.fetch
     Object.assign(process.env, r2Env)
     global.fetch = async () => new Response(null, { status: 200, headers: { 'content-length': '10', 'content-type': 'application/pdf' } })
-    try { await execute(provider, 'submitProviderApplication', [[{ name: 'permit.pdf', type: 'application/pdf', key: `private/provider-docs/${owner}/${'0'.repeat(32)}.pdf`, size: 10 }]]) }
+    const doc = (name, n) => ({ name, type: 'application/pdf', key: `private/provider-docs/${owner}/${String(n).repeat(32)}.pdf`, size: 10 })
+    try { await execute(provider, 'submitProviderApplication', [[doc('permit.pdf', 0), doc('id.pdf', 1)]]) }
     finally { global.fetch = realFetch; for (const [name, value] of Object.entries(savedEnv)) if (value === undefined) delete process.env[name]; else process.env[name] = value }
     const google = { id: 'user_google_provider', authSource: 'clerk', email: provider.email, app_metadata: { provider: 'google' }, user_metadata: {} }
     const clerkEmail = { ...google, app_metadata: { provider: 'email' } }
@@ -69,7 +63,7 @@ test('full server workflows persist in PostgreSQL and roll back conflicting writ
     assert.equal(JSON.parse(googleState.session['soundstage-session']).role, 'provider')
     assert.equal(JSON.parse(googleState.records['soundstage-accounts-v2']).find(a => a.email === provider.email).application.status, 'Pending')
     await assert.rejects(execute({ ...google, email: 'changed@test.com' }), /email changed/)
-    await db.query('INSERT INTO soundstage.profiles(clerk_user_id,email,role) VALUES ($1,$2,$3)', ['user_admin_attempt', admin.email, 'admin'])
+    // The admin row exists from the earlier sign-in; the first Clerk sign-in links to it by email.
     const clerkAdmin = { ...google, id: 'user_admin_attempt', email: admin.email }
     const migratedAdmin = await execute(clerkAdmin)
     assert.equal(JSON.parse(migratedAdmin.session['soundstage-session']).role, 'admin')
@@ -78,16 +72,20 @@ test('full server workflows persist in PostgreSQL and roll back conflicting writ
     await execute(google, 'saveProviderService', [{ id: 'service-1', name: 'Lights', location: 'Balayan', price: 1000, active: true }])
     const publicState = await execute(null)
     assert.ok(publicState.records['soundstage-provider-services-v2:provider%40test.com'])
+    const serviceId = JSON.parse(publicState.records['soundstage-provider-services-v2:provider%40test.com'])[0].id
+    assert.match(serviceId, /^\d+$/)
+    const [account] = (await db.query("SELECT verification_status, business_permit, valid_id FROM soundstage.users WHERE email = 'provider@test.com'")).rows
+    assert.deepEqual([account.verification_status, account.business_permit.endsWith('0'.repeat(32) + '.pdf'), account.valid_id.endsWith('1'.repeat(32) + '.pdf')], ['approved', true, true])
     assert.equal(JSON.stringify(publicState).includes('JVBERi0='), false)
     // Booking plan 4 (T4.1): request → accept → webhook pays → confirmed → complete → feedback, all through execute().
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
-    const bookingInput = { packageId: 'service-1', date: today, time: '12:00', eventTown: 'Balayan', location: 'Venue', guests: 10, total: 1, downpayment: 1, status: 'confirmed', paid: true }
+    const bookingInput = { packageId: serviceId, date: today, time: '12:00', eventTown: 'Balayan', location: 'Venue', guests: 10, total: 1, downpayment: 1, status: 'confirmed', paid: true }
     const created = await Promise.allSettled([execute(client, 'saveClientBooking', [{ ...bookingInput, idempotencyKey: 'pg-1' }]), execute(outsider, 'saveClientBooking', [{ ...bookingInput, idempotencyKey: 'pg-2' }])])
     assert.deepEqual(created.map(r => r.status), ['fulfilled', 'fulfilled'])
     const winner = created[0].value.result, otherBooking = created[1].value.result
     assert.deepEqual(Object.keys(winner), ['id'])
     assert.equal((await execute(client, 'saveClientBooking', [{ ...bookingInput, idempotencyKey: 'pg-1' }])).result.id, winner.id)
-    const [stored] = (await db.query('SELECT status, total::float AS total FROM soundstage.bookings WHERE id = $1', [winner.id])).rows
+    const [stored] = (await db.query('SELECT status, total_amount::float AS total FROM soundstage.bookings WHERE booking_id = $1', [winner.id])).rows
     assert.deepEqual(stored, { status: 'pending', total: 1000 })
     const saved = await execute(client)
     assert.equal(JSON.parse(saved.records['soundstage-client-bookings-v3:client%40test.com']).length, 1)
@@ -95,7 +93,7 @@ test('full server workflows persist in PostgreSQL and roll back conflicting writ
     const unrelated = await execute(outsider)
     assert.equal(unrelated.records['soundstage-client-bookings-v3:client%40test.com'], undefined)
     await assert.rejects(execute(outsider, 'updateClientBookingStatus', [winner.id, 'Cancelled']), /not found/)
-    assert.deepEqual((await execute(client, 'getBookingAvailability', ['service-1'])).result, [])
+    assert.deepEqual((await execute(client, 'getBookingAvailability', [serviceId])).result, [])
     const accepted = await Promise.allSettled([
       execute(google, 'updateClientBookingStatus', [winner.id, 'Confirmed']),
       execute(google, 'acceptBooking', [otherBooking.id]),
@@ -103,7 +101,7 @@ test('full server workflows persist in PostgreSQL and roll back conflicting writ
     assert.equal(accepted[0].status, 'fulfilled')
     assert.equal(accepted[1].status, 'rejected')
     assert.match(accepted[1].reason.message, /already booked/)
-    assert.deepEqual((await execute(client, 'getBookingAvailability', ['service-1'])).result, [today])
+    assert.deepEqual((await execute(client, 'getBookingAvailability', [serviceId])).result, [today])
     const started = (await execute(client, 'startBookingPayment', [winner.id, 'downpayment', 'GCash'])).result
     await assert.rejects(execute(client, 'startBookingPayment', [winner.id, 'downpayment', 'GCash', 1]), /Invalid input/)
     const webhook = load('lib/server/payments/webhook.ts')
@@ -115,8 +113,9 @@ test('full server workflows persist in PostgreSQL and roll back conflicting writ
     await execute(google, 'updateClientBookingStatus', [winner.id, 'Completed'])
     await execute(client, 'submitEventFeedback', [winner.id, 5, 'Excellent'])
     await assert.rejects(execute(client, 'submitEventFeedback', [winner.id, 4, 'Again']), /already/)
-    const history = (await db.query('SELECT new_status, actor_role FROM soundstage.booking_status_history WHERE booking_id = $1 ORDER BY id', [winner.id])).rows
+    const history = (await db.query("SELECT new_value AS new_status, actor_role FROM soundstage.audit_log WHERE table_name = 'bookings' AND record_id = $1 AND action = 'Booking status changed' ORDER BY audit_id", [winner.id])).rows
     assert.deepEqual(history.map(h => h.new_status), ['pending', 'accepted', 'awaiting_payment', 'confirmed', 'in_progress', 'completed'])
+    assert.deepEqual((await db.query('SELECT rating, comment FROM soundstage.feedback WHERE booking_id = $1', [winner.id])).rows, [{ rating: 5, comment: 'Excellent' }])
     assert.equal(history[3].actor_role, 'system')
     // Refund decisions are payroll master only (AC26).
     await assert.rejects(execute(clerkAdmin, 'reviewBookingRefund', [winner.id, 'Paid', 'REF-1']), /permission/)
@@ -124,8 +123,8 @@ test('full server workflows persist in PostgreSQL and roll back conflicting writ
     const finalBooking = JSON.parse(finalState.records['soundstage-client-bookings-v3:client%40test.com'])[0]
     assert.equal(finalBooking.status, 'completed')
     assert.equal(finalBooking.feedback.rating, 5)
-    // Booking JSON is the rollback copy and is never written after plan 4.
-    assert.equal((await db.query("SELECT count(*)::int AS n FROM soundstage.records WHERE key LIKE 'soundstage-client-bookings-v3:%'")).rows[0].n, 0)
+    // Every screen record came from the 11 tables; the old JSON store no longer exists.
+    assert.equal((await db.query("SELECT to_regclass('soundstage.records') IS NULL AS gone")).rows[0].gone, true)
     await assert.rejects(execute(null, 'saveProviderService', [{}]), /Sign in/)
     await assert.rejects(execute(clerkAdmin, 'constructor', []), /Unknown operation/)
     // Editable signup metadata must not grant administrator access.
@@ -138,34 +137,35 @@ test('full server workflows persist in PostgreSQL and roll back conflicting writ
   } finally { await db.close() }
 })
 
-test('booking schema enforces statuses, no overlap, append-only history and immutable snapshots', async () => {
-  const db = new PGlite({ extensions: { btree_gist: require('@electric-sql/pglite/contrib/btree_gist').btree_gist } })
+test('the database enforces booking statuses, no double booking, and unchangeable money and audit rows', async () => {
+  const { openDatabase, seed, insertBooking } = require('../helpers/seed.cjs')
+  const db = await openDatabase()
   try {
-    await db.exec('CREATE ROLE anon; CREATE ROLE authenticated; CREATE SCHEMA auth; CREATE TABLE auth.users(id uuid PRIMARY KEY);')
-    const schema = readFileSync('database/schema.sql', 'utf8')
-    await db.exec(schema)
-    await db.exec(schema)
-    const tables = ['bookings', 'booking_status_history', 'availability_schedules', 'reschedule_requests', 'cancellation_requests']
-    for (const table of tables) assert.equal((await db.query('SELECT to_regclass($1) IS NOT NULL AS ok', ['soundstage.' + table])).rows[0].ok, true)
-    const insert = (provider, status, start, end) => db.query("INSERT INTO soundstage.bookings(client_email,provider_email,package_name,package_price,start_date,end_date,status) VALUES ('c@test.com',$1,'Pkg',1000,$2,$3,$4) RETURNING id", [provider, start, end, status])
-    await assert.rejects(insert('p@test.com', 'paid', '2026-11-01', '2026-11-02'), /check constraint/)
-    const first = (await insert('p@test.com', 'confirmed', '2026-11-01', '2026-11-03')).rows[0].id
-    await assert.rejects(insert('p@test.com', 'confirmed', '2026-11-02', '2026-11-04'), error => error.code === '23P01')
-    await assert.rejects(insert('p@test.com', 'in_progress', '2026-11-01', '2026-11-02'), error => error.code === '23P01')
-    await insert('p@test.com', 'confirmed', '2026-11-03', '2026-11-04')
-    await insert('other@test.com', 'confirmed', '2026-11-01', '2026-11-03')
-    await insert('p@test.com', 'pending', '2026-11-01', '2026-11-03')
-    await db.query("INSERT INTO soundstage.booking_status_history(booking_id,new_status,actor_role) VALUES ($1,'confirmed','system')", [first])
-    await assert.rejects(db.query("UPDATE soundstage.booking_status_history SET reason='x'"), /append-only/)
-    await assert.rejects(db.query('DELETE FROM soundstage.booking_status_history'), /append-only/)
-    await assert.rejects(db.query('UPDATE soundstage.bookings SET package_price=1 WHERE id=$1', [first]), /immutable/)
-    await db.query("UPDATE soundstage.bookings SET status='completed' WHERE id=$1", [first])
-    await db.query("INSERT INTO soundstage.cancellation_requests(booking_id,requested_by) VALUES ($1,'c@test.com')", [first])
-    await assert.rejects(db.query("INSERT INTO soundstage.cancellation_requests(booking_id,requested_by) VALUES ($1,'c@test.com')", [first]), /duplicate key/)
-    for (const role of ['anon', 'authenticated']) {
-      await db.exec('SET ROLE ' + role)
-      for (const table of tables) await assert.rejects(db.query('SELECT * FROM soundstage.' + table), /permission denied/)
-      await db.exec('RESET ROLE')
-    }
+    const ids = await seed(db, { users: [{ email: 'c@test.com', role: 'client' }, { email: 'p@test.com', role: 'provider' }, { email: 'o@test.com', role: 'provider' }], packages: [{ key: 'pkg', provider: 'p@test.com' }, { key: 'other', provider: 'o@test.com' }] })
+    const book = (date, status, provider = 'p@test.com', pkg = 'pkg', days = 2) => insertBooking(db, ids, { client: 'c@test.com', provider, pkg, date, days, status })
+    await assert.rejects(book('2027-11-01', 'paid'), /check constraint/)
+    const first = await book('2027-11-01', 'confirmed')
+    await assert.rejects(book('2027-11-02', 'confirmed'), error => error.code === '23P01')
+    await assert.rejects(book('2027-11-01', 'in_progress', 'p@test.com', 'pkg', 1), error => error.code === '23P01')
+    await book('2027-11-03', 'confirmed')
+    await book('2027-11-01', 'confirmed', 'o@test.com', 'other')
+    await book('2027-11-01', 'pending')
+    await assert.rejects(db.query("UPDATE soundstage.bookings SET request_type = 'reschedule', request_status = 'pending' WHERE booking_id = $1", [first]), /check constraint/)
+    await db.query("INSERT INTO soundstage.payments (booking_id, user_id, payment_type, amount, payment_status) VALUES ($1, $2, 'downpayment', 3000, 'paid')", [first, ids['c@test.com']])
+    await assert.rejects(db.query("INSERT INTO soundstage.payments (booking_id, user_id, payment_type, amount) VALUES ($1, $2, 'downpayment', 3000)", [first, ids['c@test.com']]).then(() => db.query("INSERT INTO soundstage.payments (booking_id, user_id, payment_type, amount) VALUES ($1, $2, 'downpayment', 3000)", [first, ids['c@test.com']])), /duplicate key/)
+    await assert.rejects(db.query('DELETE FROM soundstage.payments'), /cannot be deleted/)
+    await assert.rejects(db.query('UPDATE soundstage.payments SET refunded_amount = 3001'), /check constraint/)
+    await db.query("INSERT INTO soundstage.refunds (booking_id, client_id, amount, payout_method, payout_account) VALUES ($1, $2, 3000, 'GCash', '0917')", [first, ids['c@test.com']])
+    await assert.rejects(db.query("INSERT INTO soundstage.refunds (booking_id, client_id, amount, payout_method, payout_account) VALUES ($1, $2, 3000, 'GCash', '0917')", [first, ids['c@test.com']]), /duplicate key/)
+    await assert.rejects(db.query("UPDATE soundstage.refunds SET status = 'completed'"), /check constraint/)
+    await assert.rejects(db.query('DELETE FROM soundstage.refunds'), /cannot be deleted/)
+    await db.query("INSERT INTO soundstage.audit_log (actor_role, action, table_name, record_id) VALUES ('system', 'Test', 'bookings', $1)", [first])
+    await assert.rejects(db.query("UPDATE soundstage.audit_log SET action = 'x'"), /cannot be updated/)
+    await assert.rejects(db.query('DELETE FROM soundstage.audit_log'), /cannot be deleted/)
+    await db.query("INSERT INTO soundstage.feedback (booking_id, client_id, provider_id, rating, comment) VALUES ($1, $2, $3, 5, 'Great')", [first, ids['c@test.com'], ids['p@test.com']])
+    await assert.rejects(db.query("INSERT INTO soundstage.feedback (booking_id, client_id, provider_id, rating, comment) VALUES ($1, $2, $3, 4, 'Again')", [first, ids['c@test.com'], ids['p@test.com']]), /duplicate key/)
+    await assert.rejects(db.query('UPDATE soundstage.feedback SET rating = 1'), /cannot be updated/)
+    await assert.rejects(db.query("INSERT INTO soundstage.schedules (provider_id, available_date, weekday) VALUES ($1, '2027-01-01', 1)", [ids['p@test.com']]), /check constraint/)
+    await assert.rejects(db.query("INSERT INTO soundstage.subscriptions (provider_id, plan_type, start_date, end_date, status) VALUES ($1, 'Gold', current_date, current_date, 'active')", [ids['p@test.com']]), /check constraint/)
   } finally { await db.close() }
 })

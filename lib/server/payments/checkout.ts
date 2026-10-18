@@ -2,23 +2,47 @@ import { currentTx } from "../runtime"
 import { RequestError } from "../request-error"
 import { downpaymentFor, lockOwned, paidTotal } from "../bookings/core"
 import type { Actor } from "../bookings/rules"
+import { requireUserId, userIdByEmail } from "../db/users"
 import { createCheckout, paymongo } from "./paymongo"
 
 export type PaymentType = "downpayment" | "full" | "balance" | "subscription"
-type Open = { id: string; checkout_url: string | null }
-type Status = { id: string; owner_email: string; target_kind: string; status: string; checkout_url: string | null; checkout_session_id: string | null }
+type Status = { payment_id: string; user_id: string; booking_id: string | null; payment_status: string; checkout_url: string | null; checkout_session_id: string | null }
 const BUSY = "A checkout for this payment is already being started. Please try again in a moment."
+const isPaymentId = (value: unknown): value is string => typeof value === "string" && /^\d{1,18}$/.test(value)
 
-// Amounts come only from the server; one open checkout per target and type (D7, D12).
-export async function startCheckout(input: { ownerEmail: string; targetKind: "booking" | "subscription"; targetId: string; type: PaymentType; name: string; amount: number; method: string; plan?: string }) {
+// Amounts come only from the server; one open checkout per booking (or plan) and type (D7, D12).
+// The payment row is created first; its payment_id is the reference PayMongo echoes back to the webhook.
+export async function startCheckout(input: { ownerEmail: string; target: { bookingId: string } | { plan: string }; type: PaymentType; name: string; amount: number; method: string }) {
   const tx = currentTx()
-  const [open] = await tx<Open[]>`select id, checkout_url from soundstage.payments where target_id = ${input.targetId} and type = ${input.type} and status = 'pending' for update`
-  if (open?.checkout_url) return { id: open.id, checkoutUrl: open.checkout_url }
+  const userId = await requireUserId(tx, input.ownerEmail)
+  const [open] = "bookingId" in input.target
+    ? await tx<{ payment_id: string; checkout_url: string | null }[]>`select payment_id, checkout_url from soundstage.payments
+        where booking_id = ${input.target.bookingId} and payment_type = ${input.type} and payment_status = 'pending' for update`
+    : await tx<{ payment_id: string; checkout_url: string | null }[]>`select payment_id, checkout_url from soundstage.payments
+        where user_id = ${userId} and payment_type = 'subscription' and payment_status = 'pending' and checkout_session_id is not null for update`
+  if (open?.checkout_url) return { id: String(open.payment_id), checkoutUrl: open.checkout_url }
   // A pending row without a URL is another request still starting its checkout.
   if (open) throw new RequestError(BUSY, 409)
   if (!(input.amount > 0)) throw new RequestError("Nothing is left to pay.")
-  // The payment id doubles as the PayMongo reference, so the webhook can match it exactly.
-  const id = crypto.randomUUID()
+  let row: { payment_id: string }
+  try {
+    if ("bookingId" in input.target) {
+      ;[row] = await tx<{ payment_id: string }[]>`insert into soundstage.payments (booking_id, user_id, amount, payment_type, payment_method)
+        values (${input.target.bookingId}, ${userId}, ${input.amount}, ${input.type}, ${input.method.slice(0, 50)}) returning payment_id`
+    } else {
+      // The plan waits as a pending subscription until the verified payment activates it.
+      const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila" }).format(new Date())
+      const [subscription] = await tx<{ subscription_id: string }[]>`insert into soundstage.subscriptions (provider_id, plan_type, price, start_date, end_date, status)
+        values (${userId}, ${input.target.plan}, ${input.amount}, ${today}::date, ${today}::date, 'pending') returning subscription_id`
+      ;[row] = await tx<{ payment_id: string }[]>`insert into soundstage.payments (subscription_id, user_id, amount, payment_type, payment_method)
+        values (${subscription.subscription_id}, ${userId}, ${input.amount}, 'subscription', ${input.method.slice(0, 50)}) returning payment_id`
+    }
+  } catch (error) {
+    // A concurrent first request won the one-pending index (D12); this one stores nothing.
+    if ((error as { code?: string }).code === "23505") throw new RequestError(BUSY, 409)
+    throw error
+  }
+  const id = String(row.payment_id)
   let url: URL
   let sessionId: string
   try {
@@ -30,14 +54,7 @@ export async function startCheckout(input: { ownerEmail: string; targetKind: "bo
     throw new RequestError("Checkout could not be started. Please try again.", 503)
   }
   if (url.protocol !== "https:" || url.hostname !== "checkout.paymongo.com") throw new RequestError("Checkout could not be started. Please try again.", 503)
-  try {
-    await tx`insert into soundstage.payments (id, target_kind, target_id, owner_email, type, plan, amount, checkout_session_id, checkout_url)
-      values (${id}::uuid, ${input.targetKind}, ${input.targetId}, ${input.ownerEmail.toLowerCase()}, ${input.type}, ${input.plan ?? null}, ${input.amount}, ${sessionId}, ${url.href})`
-  } catch (error) {
-    // A concurrent first request won the one-pending index (D12); this one stores nothing.
-    if ((error as { code?: string }).code === "23505") throw new RequestError(BUSY, 409)
-    throw error
-  }
+  await tx`update soundstage.payments set checkout_session_id = ${sessionId}, checkout_url = ${url.href}, updated_at = now() where payment_id = ${id}`
   return { id, checkoutUrl: url.href }
 }
 
@@ -59,34 +76,37 @@ export async function startBookingPayment(actor: Actor, bookingId: unknown, type
     if (row.status !== "confirmed" || price - paid <= 0) throw new RequestError(`No balance is due for a booking that is ${row.status}.`, 409)
     amount = price - paid
   }
-  return startCheckout({ ownerEmail: actor.email, targetKind: "booking", targetId: row.id, type, name: `Booking ${type}`, amount, method })
+  return startCheckout({ ownerEmail: actor.email, target: { bookingId: row.id }, type, name: `Booking ${type}`, amount, method })
 }
 
 async function ownPayment(actor: Actor, id: unknown, lock = false) {
-  if (typeof id !== "string" || !/^[0-9a-f-]{36}$/i.test(id)) throw new RequestError("Payment not found.", 404)
+  if (!isPaymentId(id)) throw new RequestError("Payment not found.", 404)
   const tx = currentTx()
   const [row] = lock
-    ? await tx<Status[]>`select id, owner_email, target_kind, status, checkout_url, checkout_session_id from soundstage.payments where id = ${id}::uuid for update`
-    : await tx<Status[]>`select id, owner_email, target_kind, status, checkout_url, checkout_session_id from soundstage.payments where id = ${id}::uuid`
+    ? await tx<Status[]>`select payment_id, user_id, booking_id, payment_status, checkout_url, checkout_session_id from soundstage.payments where payment_id = ${id} for update`
+    : await tx<Status[]>`select payment_id, user_id, booking_id, payment_status, checkout_url, checkout_session_id from soundstage.payments where payment_id = ${id}`
   // Missing and not-owned look the same (AC18).
-  if (!row || (actor.role !== "admin" && row.owner_email !== actor.email.toLowerCase())) throw new RequestError("Payment not found.", 404)
-  return row
+  const userId = await userIdByEmail(tx, actor.email)
+  if (!row || (actor.role !== "admin" && Number(row.user_id) !== userId)) throw new RequestError("Payment not found.", 404)
+  return { ...row, kind: row.booking_id ? "booking" : "subscription" }
 }
 
 // Read-only: the return page never settles anything (AC17, AC18).
 export async function getPaymentStatus(actor: Actor, id: unknown) {
   const row = await ownPayment(actor, id)
-  return { status: row.status, kind: row.target_kind, ...(row.status === "pending" && row.checkout_url ? { checkoutUrl: row.checkout_url } : {}) }
+  return { status: row.payment_status, kind: row.kind, ...(row.payment_status === "pending" && row.checkout_url ? { checkoutUrl: row.checkout_url } : {}) }
 }
 
 // Expiring can never mark a payment paid; a paid webhook for it goes to review.
 export async function cancelPayment(actor: Actor, id: unknown) {
   const row = await ownPayment(actor, id, true)
-  if (row.status !== "pending") return { status: row.status, kind: row.target_kind }
+  if (row.payment_status !== "pending") return { status: row.payment_status, kind: row.kind }
   if (row.checkout_session_id) {
     try { await paymongo("/" + encodeURIComponent(row.checkout_session_id) + "/expire", undefined, "POST") }
     catch { throw new RequestError("Checkout could not be cancelled. Please try again.", 503) }
   }
-  await currentTx()`update soundstage.payments set status = 'expired', updated_at = now() where id = ${row.id}`
-  return { status: "expired", kind: row.target_kind }
+  const tx = currentTx()
+  const [payment] = await tx<{ subscription_id: string | null }[]>`update soundstage.payments set payment_status = 'expired', updated_at = now() where payment_id = ${row.payment_id} returning subscription_id`
+  if (payment?.subscription_id) await tx`update soundstage.subscriptions set status = 'cancelled' where subscription_id = ${payment.subscription_id} and status = 'pending'`
+  return { status: "expired", kind: row.kind }
 }

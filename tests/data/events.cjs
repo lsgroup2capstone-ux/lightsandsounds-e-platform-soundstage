@@ -1,8 +1,7 @@
 const { test } = require('node:test')
 const assert = require('node:assert/strict')
-const { readFileSync } = require('node:fs')
-const { PGlite } = require('@electric-sql/pglite')
-const { btree_gist } = require('@electric-sql/pglite/contrib/btree_gist')
+const { openDatabase, seed } = require('../helpers/seed.cjs')
+const tables = require('../helpers/record-tables.cjs')
 
 // Replaces the JSON-runtime checks: the same legacy function names now run on the booking tables (booking plan 4).
 const load = require('../helpers/ts-loader.cjs')()
@@ -11,40 +10,30 @@ const core = load('lib/server/bookings/core.ts')
 const bookings = load('lib/server/domain/client-bookings.ts')
 const { MemoryStorage } = load('lib/data/memory-storage.ts')
 
-const accounts = [
-  { role: 'client', email: 'client@example.com', firstName: 'Test', lastName: 'Client' },
-  { role: 'client', email: 'other@example.com', firstName: 'Other', lastName: 'Client' },
-  { role: 'provider', email: 'team@example.com', business: 'Event Team', application: { status: 'Approved' } },
-  { role: 'provider', email: 'rival@example.com', business: 'Other Team', application: { status: 'Approved' } },
-  { role: 'admin', email: 'admin@example.com' },
-  { role: 'payroll_master', email: 'pm@example.com' },
-]
-const services = [{ id: 'svc-1', name: 'Lights', price: 5000, location: 'Balayan', coverageAreas: 'Balayan', active: true }]
-
 async function setup() {
-  const db = new PGlite({ extensions: { btree_gist } })
-  await db.exec('CREATE ROLE anon; CREATE ROLE authenticated; CREATE SCHEMA auth; CREATE TABLE auth.users(id uuid PRIMARY KEY);')
-  await db.exec(readFileSync('database/schema.sql', 'utf8'))
-  const values = {
-    'soundstage-accounts-v2': JSON.stringify(accounts),
-    'soundstage-admin-account': JSON.stringify(accounts[4]),
-    'soundstage-provider-services-v2:team%40example.com': JSON.stringify(services),
-  }
+  const db = await openDatabase()
+  const ids = await seed(db, {
+    users: [{ email: 'client@example.com', role: 'client', first: 'Test', last: 'Client' }, { email: 'other@example.com', role: 'client', first: 'Other', last: 'Client' },
+      { email: 'team@example.com', role: 'provider', business: 'Event Team' }, { email: 'rival@example.com', role: 'provider', business: 'Other Team' },
+      { email: 'admin@example.com', role: 'admin' }, { email: 'pm@example.com', role: 'payroll_master' }],
+    packages: [{ key: 'svc-1', provider: 'team@example.com', name: 'Lights', price: 5000, location: 'Balayan' }],
+  })
+  const values = { ...(await tables.readRecords(db)), 'soundstage-admin-account': JSON.stringify({ role: 'admin', email: 'admin@example.com' }) }
   const as = (role, email) => fn => db.transaction(connection => {
     const session = new MemoryStorage({ 'soundstage-session': JSON.stringify({ role, email }) })
     const tx = async (parts, ...args) => (await connection.query(parts.reduce((sql, part, i) => sql + (i ? '$' + i : '') + part, ''), args)).rows
     return runtime.context.run({ storage: new MemoryStorage(values), session, tx }, fn)
   })
   return {
-    db, client: as('client', 'client@example.com'), other: as('client', 'other@example.com'), team: as('provider', 'team@example.com'),
+    db, ids, client: as('client', 'client@example.com'), other: as('client', 'other@example.com'), team: as('provider', 'team@example.com'),
     rival: as('provider', 'rival@example.com'), admin: as('admin', 'admin@example.com'), pm: as('payroll_master', 'pm@example.com'),
   }
 }
 const today = () => core.manilaToday()
 let n = 0
-const book = (h, who = h.client, date = today()) => who(() => bookings.saveClientBooking({ packageId: 'svc-1', date, eventTown: 'Balayan', idempotencyKey: 'ev-' + ++n }))
-const pay = (h, id, amount = 1500) => h.db.query("INSERT INTO soundstage.payments (target_kind, target_id, owner_email, type, amount, status, method) VALUES ('booking', $1, 'client@example.com', 'downpayment', $2, 'paid', 'PayMongo: gcash')", [id, amount])
-core.registerPaidTotal(async id => Number((await runtime.context.getStore().tx`select coalesce(sum(amount), 0) as t from soundstage.payments where target_id = ${id} and status = 'paid'`)[0].t))
+const book = (h, who = h.client, date = today()) => who(() => bookings.saveClientBooking({ packageId: h.ids['svc-1'], date, eventTown: 'Balayan', idempotencyKey: 'ev-' + ++n }))
+const pay = (h, id, amount = 1500) => h.db.query("INSERT INTO soundstage.payments (booking_id, user_id, payment_type, amount, payment_status, payment_method) VALUES ($1, $2, 'downpayment', $3, 'paid', 'PayMongo: gcash')", [id, h.ids['client@example.com'], amount])
+core.registerPaidTotal(async id => Number((await runtime.context.getStore().tx`select coalesce(sum(amount), 0) as t from soundstage.payments where booking_id = ${id} and payment_status = 'paid'`)[0].t))
 
 test('legacy status names: provider ownership, transitions, completion, client isolation and feedback', async () => {
   const h = await setup()

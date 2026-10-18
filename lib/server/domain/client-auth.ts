@@ -23,7 +23,7 @@ function readSession(): AccountSession | null { try { return JSON.parse(session.
 function readAdminAccount(): StoredAccount | null { try { return JSON.parse(storage.getItem(ADMIN_ACCOUNT_KEY) || "null") } catch { return null } }
 export function isProviderApproved(email: string) { return findAccount("provider", email)?.application?.status === "Approved" }
 export function validateProviderDocuments(documents: ProviderDocument[], ownerEmail: string) {
-  if (!Array.isArray(documents) || !documents.length || documents.length > 4) throw new Error("Upload 1 to 4 documents, including your business permit and valid ID.")
+  if (!Array.isArray(documents) || documents.length !== 2) throw new Error("Upload your business permit and a valid ID (one file each).")
   if (documents.some(doc => !doc || typeof doc.name !== "string" || !doc.name.trim() || doc.name.length > 200 || !["application/pdf", "image/jpeg", "image/png"].includes(doc.type) || !Number.isInteger(doc.size) || doc.size < 1 || doc.size > 5 * 1024 * 1024 || Object.hasOwn(doc, "data") || !isOwnKey("provider-document", ownerEmail, doc.key))) throw new Error("Upload PDF, JPG or PNG documents of up to 5 MB each.")
 }
 export function submitProviderApplication(documents: ProviderDocument[]) {
@@ -41,7 +41,6 @@ export function reviewProviderApplication(email: string, status: "Approved" | "R
   if (!account?.application || account.application.status !== "Pending") throw new Error("This application is no longer pending.")
   if (!["Approved", "Rejected"].includes(status)) throw new Error("Invalid decision.")
   if (status === "Rejected" && reason.trim().length < 3) throw new Error("Give a reason for rejection.")
-  validateProviderDocuments(account.application.documents, account.email)
   saveAccount({ ...account, application: { ...account.application, status, reason: reason.trim(), reviewedAt: new Date().toISOString() } })
   if (status === "Approved") ensureProviderTrial(email)
   recordAdminAction("Provider application reviewed", email, "Pending", `${status}${reason.trim() ? ": " + reason.trim() : ""}`)

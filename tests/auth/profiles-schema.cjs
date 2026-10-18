@@ -3,39 +3,34 @@ const assert = require('node:assert/strict')
 const { readFileSync } = require('node:fs')
 const { PGlite } = require('@electric-sql/pglite')
 
-test('profiles schema is constrained, repeatable, copied from Clerk mappings and private', async () => {
+test('users table is constrained, repeatable and private (data dictionary Table 3)', async () => {
   const db = new PGlite({ extensions: { btree_gist: require('@electric-sql/pglite/contrib/btree_gist').btree_gist } })
   try {
     await db.exec('CREATE ROLE anon; CREATE ROLE authenticated; CREATE SCHEMA auth; CREATE TABLE auth.users(id uuid PRIMARY KEY);')
     const schema = readFileSync('database/schema.sql', 'utf8')
     await db.exec(schema)
-    await db.query('INSERT INTO soundstage.clerk_identities(clerk_id,email,role,created_at) VALUES ($1,$2,$3,$4)', ['user_legacy', 'legacy@example.com', 'provider', '2026-01-02T03:04:05Z'])
-    await db.query('INSERT INTO auth.users(id) VALUES ($1)', ['10000000-0000-4000-8000-000000000001'])
-    await db.query('INSERT INTO soundstage.identities(auth_id,email,role,created_at) VALUES ($1,$2,$3,$4)', ['10000000-0000-4000-8000-000000000001', 'supabase-legacy@example.com', 'client', '2026-02-03T04:05:06Z'])
-    const clerkSource = (await db.query('SELECT clerk_id,email,role,created_at::text FROM soundstage.clerk_identities ORDER BY clerk_id')).rows
-    const supabaseSource = (await db.query('SELECT auth_id::text,email,role,created_at::text FROM soundstage.identities ORDER BY auth_id')).rows
+    await db.query("INSERT INTO soundstage.users(clerk_user_id,email,first_name,last_name,role) VALUES ('user_one','one@example.com','One','User','client')")
     await db.exec(schema)
+    assert.equal((await db.query('SELECT count(*)::int AS count FROM soundstage.users')).rows[0].count, 1)
+    const columns = (await db.query("SELECT column_name FROM information_schema.columns WHERE table_schema='soundstage' AND table_name='users' ORDER BY ordinal_position")).rows.map(row => row.column_name)
+    assert.deepEqual(columns.slice(0, 10), ['user_id', 'clerk_user_id', 'first_name', 'middle_name', 'last_name', 'email', 'username', 'phone_number', 'role', 'status'])
+    assert.equal(columns.includes('password'), false)
+    const [row] = (await db.query("SELECT user_id, status, date_created FROM soundstage.users WHERE email = 'one@example.com'")).rows
+    assert.equal(row.user_id, 1)
+    assert.equal(row.status, 'active')
+    assert.ok(row.date_created instanceof Date)
 
-    const columns = (await db.query("SELECT column_name FROM information_schema.columns WHERE table_schema='soundstage' AND table_name='profiles' ORDER BY ordinal_position")).rows.map(row => row.column_name)
-    assert.deepEqual(columns, ['clerk_user_id', 'email', 'first_name', 'last_name', 'phone', 'role', 'status', 'created_at', 'updated_at'])
-    const copied = (await db.query('SELECT * FROM soundstage.profiles WHERE clerk_user_id=$1', ['user_legacy'])).rows[0]
-    assert.equal(copied.email, 'legacy@example.com')
-    assert.equal(copied.role, 'provider')
-    assert.equal(copied.status, 'active')
-    assert.deepEqual((await db.query('SELECT clerk_id,email,role,created_at::text FROM soundstage.clerk_identities ORDER BY clerk_id')).rows, clerkSource)
-    assert.deepEqual((await db.query('SELECT auth_id::text,email,role,created_at::text FROM soundstage.identities ORDER BY auth_id')).rows, supabaseSource)
-    assert.equal((await db.query('SELECT count(*)::int AS count FROM soundstage.profiles')).rows[0].count, 1)
-    assert.equal((await db.query('SELECT count(*)::int AS count FROM soundstage.schema_versions')).rows[0].count, 5)
+    await assert.rejects(db.query("INSERT INTO soundstage.users(clerk_user_id,email,role) VALUES ('bad-id','lower@example.com','client')"), /check constraint/)
+    await assert.rejects(db.query("INSERT INTO soundstage.users(email,role) VALUES ('Upper@example.com','client')"), /check constraint/)
+    await assert.rejects(db.query("INSERT INTO soundstage.users(email,role) VALUES ('role@example.com','owner')"), /check constraint/)
+    await assert.rejects(db.query("INSERT INTO soundstage.users(email,role) VALUES ('one@example.com','client')"), /duplicate key/)
+    await assert.rejects(db.query("INSERT INTO soundstage.users(email,role,verification_status) VALUES ('c@example.com','client','approved')"), /check constraint/)
+    await assert.rejects(db.query("UPDATE soundstage.users SET status='deleted'"), /check constraint/)
 
-    await assert.rejects(db.query('INSERT INTO soundstage.profiles(clerk_user_id,email,role) VALUES ($1,$2,$3)', ['bad-id', 'lower@example.com', 'client']), /check constraint/)
-    await assert.rejects(db.query('INSERT INTO soundstage.profiles(clerk_user_id,email,role) VALUES ($1,$2,$3)', ['user_upper', 'Upper@example.com', 'client']), /check constraint/)
-    await assert.rejects(db.query('INSERT INTO soundstage.profiles(clerk_user_id,email,role) VALUES ($1,$2,$3)', ['user_role', 'role@example.com', 'owner']), /check constraint/)
-    await assert.rejects(db.query("UPDATE soundstage.profiles SET status='deleted' WHERE clerk_user_id='user_legacy'"), /check constraint/)
-
-    await db.exec('SET ROLE anon')
-    await assert.rejects(db.query('SELECT * FROM soundstage.profiles'), /permission denied/)
-    await db.exec('RESET ROLE; SET ROLE authenticated')
-    await assert.rejects(db.query('SELECT * FROM soundstage.profiles'), /permission denied/)
-    await db.exec('RESET ROLE')
+    for (const role of ['anon', 'authenticated']) {
+      await db.exec('SET ROLE ' + role)
+      await assert.rejects(db.query('SELECT * FROM soundstage.users'), /permission denied/)
+      await db.exec('RESET ROLE')
+    }
   } finally { await db.close() }
 })

@@ -12,7 +12,7 @@ async function setup() {
   const db = new PGlite({ extensions: { btree_gist: require('@electric-sql/pglite/contrib/btree_gist').btree_gist } })
   await db.exec('CREATE ROLE anon; CREATE ROLE authenticated; CREATE SCHEMA auth; CREATE TABLE auth.users(id uuid PRIMARY KEY);')
   await db.exec(readFileSync('database/schema.sql', 'utf8'))
-  await db.query('INSERT INTO soundstage.profiles(clerk_user_id,email,role) VALUES ($1,$2,$3)', ['user_role_set', 'operator@example.com', 'client'])
+  await db.query('INSERT INTO soundstage.users(clerk_user_id,email,role) VALUES ($1,$2,$3)', ['user_role_set', 'operator@example.com', 'client'])
   const sql = { begin: callback => db.transaction(transaction => callback(tag(transaction))) }
   return { db, sql }
 }
@@ -23,7 +23,7 @@ test('role:set updates the profile and Clerk mirror and returns old/new roles', 
   try {
     const result = await setRole(sql, { users: { updateUserMetadata: async (...args) => { calls.push(args) } } }, ' Operator@Example.com ', 'payroll_master')
     assert.deepEqual(result, { oldRole: 'client', newRole: 'payroll_master' })
-    assert.equal((await db.query("SELECT role FROM soundstage.profiles WHERE email='operator@example.com'")).rows[0].role, 'payroll_master')
+    assert.equal((await db.query("SELECT role FROM soundstage.users WHERE email='operator@example.com'")).rows[0].role, 'payroll_master')
     assert.deepEqual(calls, [['user_role_set', { publicMetadata: { role: 'payroll_master' } }]])
   } finally { await db.close() }
 })
@@ -34,8 +34,8 @@ test('role:set rejects invalid and unknown inputs without changing a profile', a
   try {
     await assert.rejects(setRole(sql, clerk, 'not-an-email', 'admin'), /Usage/)
     await assert.rejects(setRole(sql, clerk, 'operator@example.com', 'owner'), /Usage/)
-    await assert.rejects(setRole(sql, clerk, 'missing@example.com', 'admin'), /No profile/)
-    assert.equal((await db.query("SELECT role FROM soundstage.profiles WHERE email='operator@example.com'")).rows[0].role, 'client')
+    await assert.rejects(setRole(sql, clerk, 'missing@example.com', 'admin'), /No signed-in user/)
+    assert.equal((await db.query("SELECT role FROM soundstage.users WHERE email='operator@example.com'")).rows[0].role, 'client')
   } finally { await db.close() }
 })
 
@@ -44,6 +44,6 @@ test('role:set rolls back the database change when the Clerk mirror fails', asyn
   try {
     const clerk = { users: { updateUserMetadata: async () => { throw new Error('Clerk unavailable') } } }
     await assert.rejects(setRole(sql, clerk, 'operator@example.com', 'admin'), /Clerk unavailable/)
-    assert.equal((await db.query("SELECT role FROM soundstage.profiles WHERE email='operator@example.com'")).rows[0].role, 'client')
+    assert.equal((await db.query("SELECT role FROM soundstage.users WHERE email='operator@example.com'")).rows[0].role, 'client')
   } finally { await db.close() }
 })

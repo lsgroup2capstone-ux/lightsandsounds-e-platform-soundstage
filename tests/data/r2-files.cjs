@@ -229,16 +229,19 @@ test('provider application accepts only own uploaded document keys and deletes u
   const oldKey = keys.buildKey('provider-document', provider.email, newId(1), 'application/pdf'), newKey = keys.buildKey('provider-document', provider.email, newId(2), 'application/pdf')
   const setup = storage => accounts(storage, client, { ...provider, application: { status: 'Rejected', submittedAt: 'x', reason: 'ID', documents: [{ name: 'old.pdf', type: 'application/pdf', key: oldKey, size: 10 }] } }, other)
   const doc = { name: 'permit.pdf', type: 'application/pdf', key: newKey, size: 10 }
+  // The business permit and the valid ID are both required.
+  const id = { name: 'id.pdf', type: 'application/pdf', key: keys.buildKey('provider-document', provider.email, newId(4), 'application/pdf'), size: 10 }
   await withHead(200, 'application/pdf', async () => {
     for (const bad of [{ ...doc, key: 'data:application/pdf;base64,AA' }, { ...doc, key: keys.buildKey('provider-document', other.email, newId(3), 'application/pdf') }, { ...doc, key: pngKey('profile-image', provider.email, 3), type: 'image/png' }, { ...doc, data: 'data:application/pdf;base64,AA' }])
-      await assert.rejects(run(provider, setup, () => actions.submitProviderApplication([bad])), error => error.status === 400)
-    const saved = await run(provider, setup, () => actions.submitProviderApplication([doc]))
+      await assert.rejects(run(provider, setup, () => actions.submitProviderApplication([bad, id])), error => error.status === 400)
+    await assert.rejects(run(provider, setup, () => actions.submitProviderApplication([doc])), error => error.status === 400)
+    const saved = await run(provider, setup, () => actions.submitProviderApplication([doc, id]))
     const stored = JSON.parse(saved.state.storage.getItem('soundstage-accounts-v2')).find(a => a.email === provider.email)
     assert.equal(stored.application.status, 'Pending')
-    assert.deepEqual(stored.application.documents, [doc])
+    assert.deepEqual(stored.application.documents, [doc, id])
     assert.deepEqual(saved.deletes, [oldKey])
   })
   await withHead(404, '', async () => {
-    await assert.rejects(run(provider, setup, () => actions.submitProviderApplication([doc])), rejected(400, /did not finish/))
+    await assert.rejects(run(provider, setup, () => actions.submitProviderApplication([doc, id])), rejected(400, /did not finish/))
   })
 })

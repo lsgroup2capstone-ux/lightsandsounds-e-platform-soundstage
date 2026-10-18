@@ -207,12 +207,12 @@ export function getApprovedProviders(): ClientAccount[] { return readAccounts().
 export function isProviderApproved(email: string) { return findAccount("provider", email)?.application?.status === "Approved" }
 // Shape checks only; the server also checks that each key belongs to the provider.
 export function validateProviderDocuments(documents: ProviderDocument[]) {
-  if (!documents.length || documents.length > 4) throw new Error("Upload 1 to 4 documents, including your business permit and valid ID.")
+  if (documents.length !== 2) throw new Error("Upload your business permit and a valid ID (one file each).")
   if (documents.some(doc => !doc.name.trim() || doc.name.length > 200 || !["application/pdf", "image/jpeg", "image/png"].includes(doc.type) || !Number.isInteger(doc.size) || doc.size < 1 || doc.size > 5 * 1024 * 1024 || !doc.key || Object.hasOwn(doc, "data"))) throw new Error("Upload PDF, JPG or PNG documents of up to 5 MB each.")
 }
 // Every file must upload before anything is submitted; a failure rejects the whole set.
 export async function uploadProviderDocuments(files: File[]): Promise<ProviderDocument[]> {
-  if (!files.length || files.length > 4) throw new Error("Upload 1 to 4 documents, including your business permit and valid ID.")
+  if (files.length !== 2) throw new Error("Upload your business permit and a valid ID (one file each).")
   const documents = await Promise.all(files.map(async file => ({ name: file.name, type: file.type, key: await uploadFile("provider-document", file), size: file.size })))
   validateProviderDocuments(documents)
   return documents

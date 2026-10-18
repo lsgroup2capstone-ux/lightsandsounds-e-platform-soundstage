@@ -15,12 +15,12 @@ import { currentTx } from "./runtime"
 import * as services from "./domain/provider-services"
 import * as billing from "./domain/marketplace-billing"
 import * as communications from "./domain/communications"
-import * as withdrawals from "./domain/withdrawals"
 import type { ClientAccount } from "../auth/client-auth"
 import type { Booking } from "../marketplace/mock-data"
 import { isAreaCovered, getTownDistance, getTransportationFee } from "../booking/booking-pricing"
 import { importLegacyRecords } from "./db/legacy-import"
 import { createBackup, previewBackup, restoreBackup } from "./db/backup"
+import { TRANSIENT_KEYS, loadRecords, saveRecords } from "./db/record-store"
 import { RequestError } from "./request-error"
 import "./payments/ledger"
 import { KIND_RULES, buildKey, isDataUrl, isFileKind, isOwnKey, type FileKind } from "./storage/file-keys"
@@ -76,7 +76,7 @@ async function serviceInput(value: unknown, previous: { id: string; image: strin
   const v = record(value)
   const id = text(v.id, 100)
   if (Object.entries(storage.values).some(([k, raw]) => k.startsWith(servicePrefix) && k !== keyFor(servicePrefix, a.email) && JSON.parse(raw).some((s: { id: string }) => s.id === id))) throw new RequestError("Service ID already exists.")
-  return { id, name: text(v.name, 200), location: text(v.location, 200), coverageAreas: text(v.coverageAreas || v.location, 2000), transportationFee: finite(v.transportationFee || 0), description: String(v.description || "").slice(0, 5000), price: finite(v.price, 1), image: await verifiedKey("service-image", a.email, v.image, previous.find(s => s.id === id)?.image), providerName: providerName(a), active: v.active === true, bookings: 0, category: serviceCategories.includes(String(v.category)) ? v.category as services.ProviderService["category"] : "Full Production" }
+  return { id, name: text(v.name, 100), location: text(v.location, 200), coverageAreas: text(v.coverageAreas || v.location, 2000), transportationFee: finite(v.transportationFee || 0), description: String(v.description || "").slice(0, 5000), price: finite(v.price, 1), image: await verifiedKey("service-image", a.email, v.image, previous.find(s => s.id === id)?.image), providerName: providerName(a), active: v.active === true, bookings: 0, category: serviceCategories.includes(String(v.category)) ? v.category as services.ProviderService["category"] : "Full Production" }
 }
 async function updateProfile(value: unknown, role: "client" | "provider") {
   const actor = requireRole(role)
@@ -98,18 +98,20 @@ async function updateProfile(value: unknown, role: "client" | "provider") {
   return result
 }
 
-// Called only by the verified webhook (payments AC19).
-export function activateSubscription(payment: { id: string; email: string; plan?: string | null; amount: number; method: string; reference: string }) {
-  const at = new Date().toISOString()
-  const state = JSON.parse(storage.getItem(billingKey) || '{"subscriptions":[],"payments":[],"audit":[]}')
-  const subscription = state.subscriptions.find((s: billing.Subscription) => s.email === payment.email)
+// Called only by the verified webhook (payments AC19): the paid plan runs 30 days after the current period.
+export async function activateSubscription(subscriptionId: string) {
+  const tx = currentTx()
+  const [subscription] = await tx<{ provider_id: string; status: string }[]>`select provider_id, status from soundstage.subscriptions where subscription_id = ${subscriptionId} for update`
   if (!subscription) throw new RequestError("Subscription not found.")
-  subscription.plan = payment.plan
-  subscription.paidUntil = new Date(Math.max(Date.now(), Date.parse(subscription.paidUntil || subscription.trialEnd)) + 30 * 86400000).toISOString()
-  state.payments.unshift({ id: payment.id, email: payment.email, customer: payment.email, plan: payment.plan, amount: payment.amount, method: payment.method, reference: payment.reference, status: "Paid", createdAt: at, paidAt: at, invoice: `SI-${payment.id}` })
-  storage.setItem(billingKey, JSON.stringify(state))
+  if (subscription.status !== "pending") return
+  const today = bookingCore.manilaToday()
+  await tx`update soundstage.subscriptions s set status = 'active',
+      start_date = greatest(${today}::date, coalesce((select max(end_date) + 1 from soundstage.subscriptions o where o.provider_id = s.provider_id and o.status in ('trial', 'active') and o.subscription_id <> s.subscription_id), ${today}::date)),
+      end_date = greatest(${today}::date, coalesce((select max(end_date) + 1 from soundstage.subscriptions o where o.provider_id = s.provider_id and o.status in ('trial', 'active') and o.subscription_id <> s.subscription_id), ${today}::date)) + 30
+    where subscription_id = ${subscriptionId}`
 }
 const payer = (a: ClientAccount) => ({ id: a.email, email: a.email, role: a.role as "client" | "provider" | "admin" | "payroll_master" })
+const WITHDRAWALS_RETIRED = "Withdrawal requests are replaced by payouts that the payroll master releases for each completed booking."
 
 // This allowlist is the only browser-accessible write surface. Domain helpers are not RPCs.
 export const actions: Record<string, (...args: any[]) => unknown> = {
@@ -186,7 +188,8 @@ export const actions: Record<string, (...args: any[]) => unknown> = {
     const next = await Promise.all(values.map(v => serviceInput(v, current)))
     if (new Set(next.map(s => s.id)).size !== next.length) throw new RequestError("Duplicate services.")
     const retained = new Set(next.map(s => s.id))
-    const booked = new Set((await currentTx()<{ package_id: string }[]>`select distinct package_id from soundstage.bookings where provider_email = ${actor.email.toLowerCase()}`).map(r => r.package_id))
+    const booked = new Set((await currentTx()<{ package_id: string }[]>`select distinct b.package_id::text as package_id from soundstage.bookings b
+      join soundstage.users u on u.user_id = b.provider_id where u.email = ${actor.email.toLowerCase()}`).map(r => r.package_id))
     for (const old of services.getProviderServices("current")) if (!retained.has(old.id) && booked.has(old.id)) throw new RequestError("Deactivate services with existing bookings instead of deleting them.")
     const result = services.updateProviderServices(next)
     for (const old of current) {
@@ -228,7 +231,7 @@ export const actions: Record<string, (...args: any[]) => unknown> = {
     if (!plan) throw new RequestError("Select a plan.")
     billing.ensureProviderTrial(actor.email)
     // One open subscription checkout per provider (D12); the webhook activates it (AC19).
-    return checkout.startCheckout({ ownerEmail: actor.email, targetKind: "subscription", targetId: actor.email.toLowerCase(), type: "subscription", name: plan.name + " subscription", amount: plan.amount, method: text(method, 50), plan: plan.name })
+    return checkout.startCheckout({ ownerEmail: actor.email, target: { plan: plan.name }, type: "subscription", name: plan.name + " subscription", amount: plan.amount, method: text(method, 50) })
   },
   startBookingPayment: (...args) => {
     // Amounts are computed on the server; any extra argument is refused (AC4).
@@ -248,16 +251,9 @@ export const actions: Record<string, (...args: any[]) => unknown> = {
     return communications.submitProviderReport({ bookingId: booking.id, client: booking.client, clientEmail: actor.email, provider: booking.provider, reason: text(v.reason, 500), details: text(v.details, 2000) })
   },
   updateProviderReportStatus: (id, status) => { requireRole("payroll_master"); if (status !== "Resolved") throw new RequestError("Invalid report status."); return communications.updateProviderReportStatus(id, status) },
-  createWithdrawalRequest: async value => {
-    const actor = requireRole("provider"), v = record(value)
-    // Verified, non-demo money on completed bookings only.
-    const earned = await bookingView.completedEarnings(actor.email)
-    const reserved = withdrawals.getWithdrawalRequests().filter(w => w.providerEmail === actor.email && w.status !== "Rejected").reduce((sum, w) => sum + w.amount, 0)
-    const amount = finite(v.amount, 1)
-    if (amount > earned - reserved) throw new RequestError("Withdrawal exceeds your available verified balance. Demo payments cannot be withdrawn.")
-    return withdrawals.createWithdrawalRequest({ provider: providerName(actor), providerEmail: actor.email, amount, payoutMethod: text(v.payoutMethod, 50), payoutAccount: text(v.payoutAccount, 255) })
-  },
-  updateWithdrawalStatus: (id, status) => { requireRole("payroll_master", "admin"); if (!["Paid", "Rejected"].includes(status)) throw new RequestError("Invalid withdrawal status."); return withdrawals.updateWithdrawalStatus(id, status) },
+  // Withdrawal requests are retired: the payroll master releases a payout per completed booking (payroll-master D8).
+  createWithdrawalRequest: async () => { requireRole("provider"); throw new RequestError(WITHDRAWALS_RETIRED, 410) },
+  updateWithdrawalStatus: async () => { requireRole("payroll_master", "admin"); throw new RequestError(WITHDRAWALS_RETIRED, 410) },
 }
 
 async function publicServiceRatings() {
@@ -294,7 +290,7 @@ export async function visibleRecords() {
     for (const key of ["soundstage-booking-messages-v1", "soundstage-provider-reports-v1"]) result[key] = JSON.stringify(JSON.parse(storage.getItem(key) || "[]").filter((v: { bookingId: string }) => permittedIds.has(v.bookingId)))
     if (actor.role === "payroll_master") result["soundstage-provider-reports-v1"] = storage.getItem("soundstage-provider-reports-v1") || "[]"
     const payroll = actor.role === "payroll_master"
-    result["soundstage-withdrawals-v1"] = JSON.stringify(withdrawals.getWithdrawalRequests().filter(w => payroll || w.providerEmail === actor.email))
+    result["soundstage-withdrawals-v1"] = "[]"
     const state = JSON.parse(storage.getItem(billingKey) || '{"subscriptions":[],"payments":[],"audit":[]}')
     result[billingKey] = payroll ? JSON.stringify(state) : JSON.stringify({ subscriptions: state.subscriptions.filter((s: { email: string }) => s.email === actor.email.toLowerCase()), payments: state.payments.filter((p: { email: string }) => p.email === actor.email.toLowerCase()), audit: [] })
   }
@@ -324,33 +320,27 @@ export async function execute(user: AppIdentity | null, action?: string, args: u
   const response = await sql.begin(async tx => {
     // Serialize read/modify/write workflows so approvals, dates and balances stay consistent.
     await tx`select pg_advisory_xact_lock(74832019)`
-    const rows = await tx<{ key: string; value: unknown }[]>`select key, value from soundstage.records`
-    const originalValues = new Map(rows.map(r => [r.key, JSON.stringify(r.value)]))
-    const values = Object.fromEntries(originalValues)
-    const state = { storage: new MemoryStorage(values), session: new MemoryStorage(), pendingDeletes, tx: tx as unknown as Tx }
+    // Every collection lives in its own table; requests still see the record keys (relational-data D2, D3).
+    const originalValues = await loadRecords(tx as unknown as Tx)
+    const state = { storage: new MemoryStorage({ ...originalValues }), session: new MemoryStorage(), pendingDeletes, tx: tx as unknown as Tx }
     return context.run(state, async () => {
       if (user) {
         const isClerk = user.authSource === "clerk"; let identity: { email: string; role: string }
         if (isClerk) {
           const profile = await ensureProfile(tx, user, signupRole); if (profile.status !== "active") throw new RequestError(`This account is ${profile.status}.`, 403); identity = { email: profile.email, role: profile.role }
         } else {
-          const identities = await tx<{ email: string; role: string }[]>`select email, role from soundstage.identities where auth_id = ${user.id}`
-          identity = identities[0]
-          if (!identity) {
-            const email = user.email!.toLowerCase()
-            const imported = allAccounts().find(a => a.email.toLowerCase() === email && a.role !== "admin")
-            const role = user.app_metadata.role === "admin" ? "admin" : imported?.role || (user.user_metadata.role === "provider" || signupRole === "provider" ? "provider" : "client")
-            await tx`insert into soundstage.identities (auth_id,email,role) values (${user.id},${email},${role})`
-            identity = { email, role }
+          // Legacy Supabase sign-in: the user row is found by email; signup metadata can never grant admin.
+          const email = user.email!.toLowerCase()
+          const [row] = await tx<{ role: string }[]>`select role from soundstage.users where email = ${email}`
+          identity = row ? { email, role: row.role } : { email, role: user.app_metadata.role === "admin" ? "admin" : user.user_metadata.role === "provider" || signupRole === "provider" ? "provider" : "client" }
+          if (!row) {
+            const m = user.user_metadata
+            await tx`insert into soundstage.users (email, role, first_name, last_name, phone_number) values (${email}, ${identity.role}, ${String(m.firstName || m.given_name || "New").slice(0, 100)},
+              ${String(m.lastName || m.family_name || "User").slice(0, 100)}, ${String(m.mobile || "").slice(0, 20) || null}) on conflict (email) do nothing`
           }
-          const migrated = await tx`select 1 from soundstage.profiles where email=${identity.email}`
-          if (migrated.length) throw new RequestError("Your account now signs in with the new sign-in. Use Forgot password to set your password.", 403)
           if (user.app_metadata.role === "admin" && identity.role !== "admin") {
-            await tx`update soundstage.identities set role='admin' where auth_id=${user.id}`
-            // Bookings live in the table now; the JSON copy only covers unmigrated history (review-4 m1).
-            const [booked] = await tx`select 1 from soundstage.bookings where client_email = ${identity.email} or provider_email = ${identity.email} limit 1`
-            const hasBusinessData = !!booked || [keyFor(bookingPrefix, identity.email), keyFor(servicePrefix, identity.email)].some(key => JSON.parse(storage.getItem(key) || "[]").length)
-            if (!hasBusinessData) storage.setItem(accountsKey, JSON.stringify(allAccounts().filter(a => a.email.toLowerCase() !== identity.email)))
+            await tx`update soundstage.users set role = 'admin', verification_status = null, verification_reason = null, updated_at = now() where email = ${email}`
+            storage.setItem(accountsKey, JSON.stringify(allAccounts().map(a => a.email.toLowerCase() === email ? { ...a, role: "admin", application: undefined } : a)))
             identity = { ...identity, role: "admin" }
           }
           if (identity.role === "admin" && user.app_metadata.role !== "admin") throw new RequestError("Administrator access was revoked.", 403)
@@ -370,14 +360,10 @@ export async function execute(user: AppIdentity | null, action?: string, args: u
       let result = action ? await actions[action](...args) : null
       // Verified PayMongo events run server-side in this same transaction; never a browser action.
       if (webhook) result = await webhook()
-      for (const [key, value] of Object.entries(storage.values)) {
-        if (key === "soundstage-admin-account") continue
-        // Booking JSON is the rollback copy now; nothing may change it (booking plan 4).
-        if (key.startsWith(bookingPrefix) && originalValues.get(key) !== value) throw new Error("Booking records are read-only.")
-        if (originalValues.get(key) !== value) await tx`insert into soundstage.records (key,value) values (${key},${tx.json(JSON.parse(value))}) on conflict (key) do update set value=excluded.value, updated_at=now()`
-      }
-      for (const row of rows) if (!(row.key in storage.values) && row.key.startsWith(bookingPrefix)) throw new Error("Booking records are read-only.")
-      for (const row of rows) if (!(row.key in storage.values)) await tx`delete from soundstage.records where key=${row.key}`
+      await saveRecords(tx as unknown as Tx, originalValues, storage.values)
+      // Reload so the response shows what was stored, including rows actions changed directly (schedules).
+      const transient = Object.fromEntries(TRANSIENT_KEYS.filter(key => key in storage.values).map(key => [key, storage.values[key]]))
+      state.storage.values = { ...(await loadRecords(tx as unknown as Tx)), ...transient }
       return { records: await visibleRecords(), session: { ...session.values }, result, filesBaseUrl: publicBaseUrl() }
     })
   })

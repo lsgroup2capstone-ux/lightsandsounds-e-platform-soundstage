@@ -11,7 +11,9 @@ const file = new Module('applications-test')
 file.require = name => name === '../storage/file-keys' ? keysModule.exports : name === "../runtime" ? { storage: global.localStorage, session: global.sessionStorage, events: global.window } : name === './marketplace-billing' ? { ensureProviderTrial: email => trials.push(email), migrateProviderBilling() {}, recordAdminAction: (...args) => audits.push(args), recordMarketplaceAction: (...args) => audits.push(args) } : require(name)
 file._compile(transpileModule(readFileSync('lib/server/domain/client-auth.ts', 'utf8'), { compilerOptions: { module: ModuleKind.CommonJS } }).outputText, 'applications-test.js')
 const auth = file.exports
-const documents = [{ name: 'permit.pdf', type: 'application/pdf', key: keysModule.exports.buildKey('provider-document', 'provider@example.com', '0123456789abcdef0123456789abcdef', 'application/pdf'), size: 1024 }]
+// Business permit and valid ID: exactly two documents (users.business_permit, users.valid_id).
+const documents = [{ name: 'permit.pdf', type: 'application/pdf', key: keysModule.exports.buildKey('provider-document', 'provider@example.com', '0123456789abcdef0123456789abcdef', 'application/pdf'), size: 1024 },
+  { name: 'id.png', type: 'image/png', key: keysModule.exports.buildKey('provider-document', 'provider@example.com', 'fedcba9876543210fedcba9876543210', 'image/png'), size: 2048 }]
 const account = { role: 'provider', email: 'provider@example.com', firstName: 'Test', lastName: 'Provider', business: 'Events', authMethod: 'email', application: { status: 'Pending', documents, submittedAt: new Date().toISOString() } }
 localStorage.setItem('soundstage-accounts-v2', JSON.stringify([account]))
 sessionStorage.setItem('soundstage-session', JSON.stringify({ role: account.role, email: account.email }))
@@ -41,6 +43,7 @@ const doc = documents[0]
 for (const bad of [{ ...doc, type: 'text/html' }, { ...doc, size: 0 }, { ...doc, size: 5 * 1024 * 1024 + 1 }, { ...doc, name: '' }, { ...doc, name: 'x'.repeat(201) }, { ...doc, data: 'data:application/pdf;base64,AA' }, { ...doc, key: 'data:application/pdf;base64,AA' }])
   assert.throws(() => auth.validateProviderDocuments([bad], account.email))
 assert.throws(() => auth.validateProviderDocuments(documents, 'other@example.com'))
-assert.throws(() => auth.validateProviderDocuments([doc, doc, doc, doc, doc], account.email))
+assert.throws(() => auth.validateProviderDocuments([doc, doc, doc], account.email))
+assert.throws(() => auth.validateProviderDocuments([doc], account.email))
 auth.validateProviderDocuments(documents, account.email)
 console.log('Provider application checks passed: documents, pending signup, trial timing, admin authorization, rejection, resubmission, approval, duplicate review, Supabase identity and audit.')

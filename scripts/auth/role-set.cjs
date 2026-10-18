@@ -6,10 +6,12 @@ async function setRole(sql, clerk, inputEmail, role) {
     throw new Error('Usage: npm run role:set -- <email> <client|provider|payroll_master|admin>')
   }
   return sql.begin(async tx => {
-    const rows = await tx`select clerk_user_id,role from soundstage.profiles where email=${email} for update`
-    if (!rows.length) throw new Error(`No profile for ${email}. The user must sign in once first.`)
+    const rows = await tx`select user_id,clerk_user_id,role from soundstage.users where email=${email} for update`
+    if (!rows.length || !rows[0].clerk_user_id) throw new Error(`No signed-in user for ${email}. The user must sign in once first.`)
     const oldRole = rows[0].role
-    await tx`update soundstage.profiles set role=${role},updated_at=now() where clerk_user_id=${rows[0].clerk_user_id}`
+    // Only providers carry verification fields (users table check).
+    await tx`update soundstage.users set role=${role}, verification_status = case when ${role} = 'provider' then verification_status end,
+      verification_reason = case when ${role} = 'provider' then verification_reason end, updated_at=now() where user_id=${rows[0].user_id}`
     await clerk.users.updateUserMetadata(rows[0].clerk_user_id, { publicMetadata: { role } })
     return { oldRole, newRole: role }
   })

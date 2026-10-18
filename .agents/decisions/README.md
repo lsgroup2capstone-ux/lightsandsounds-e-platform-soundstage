@@ -13,3 +13,4 @@ accepted decision without the user's approval.
 | [0003](0003-payments-webhook-only.md) | Payments become paid only through a verified, deduplicated webhook | proposed |
 | [0004](0004-financial-records-and-audit.md) | Financial records never deleted; payroll master decides money; append-only audit | proposed |
 | [0005](0005-build-order.md) | Twelve-step build order; role specs split into matching plans | proposed |
+| [0006](0006-all-data-relational.md) | The database is the 11 core tables of the data dictionary | accepted |

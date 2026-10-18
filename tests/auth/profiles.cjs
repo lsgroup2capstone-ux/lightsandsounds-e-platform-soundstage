@@ -47,52 +47,37 @@ test('first Clerk requests create one client/provider profile and reject privile
     assert.equal(JSON.parse((await execute(client, undefined, [], 'client')).session['soundstage-session']).role, 'client')
     assert.equal(JSON.parse((await execute(requestedAdmin, undefined, [], 'admin')).session['soundstage-session']).role, 'client')
     assert.equal(JSON.parse((await execute(requestedPayroll, undefined, [], 'payroll_master')).session['soundstage-session']).role, 'client')
-    const rows = (await db.query('SELECT clerk_user_id,role FROM soundstage.profiles ORDER BY clerk_user_id')).rows
+    const rows = (await db.query('SELECT clerk_user_id,role FROM soundstage.users ORDER BY clerk_user_id')).rows
     assert.deepEqual(rows.map(row => row.role).sort(), ['client', 'client', 'client', 'provider'])
     assert.deepEqual(mirrors.map(item => item.value.publicMetadata.role).sort(), ['client', 'client', 'client', 'provider'])
   } finally { await db.close() }
 })
 
-test('legacy mapping wins, concurrent first requests stay singular, and inactive profiles are denied', async () => {
+test('an existing user is linked by email and keeps its role; concurrent first requests stay singular; inactive users are denied', async () => {
   const { db, mirrors, execute } = await setup()
   try {
-    const legacy = identity('user_legacy_provider', 'legacy@example.com')
-    await db.query('INSERT INTO soundstage.clerk_identities(clerk_id,email,role) VALUES ($1,$2,$3)', [legacy.id, legacy.email, 'provider'])
-    assert.equal(JSON.parse((await execute(legacy, undefined, [], 'client')).session['soundstage-session']).role, 'provider')
+    // Users copied from the old tables have no Clerk id until their first sign-in.
+    await db.query("INSERT INTO soundstage.users(email,first_name,last_name,role) VALUES ('legacy@example.com','Legacy','Admin','admin')")
+    const legacy = identity('user_legacy_admin', 'legacy@example.com')
+    assert.equal(JSON.parse((await execute(legacy, undefined, [], 'client')).session['soundstage-session']).role, 'admin')
+    assert.equal((await db.query("SELECT clerk_user_id FROM soundstage.users WHERE email='legacy@example.com'")).rows[0].clerk_user_id, legacy.id)
 
     const concurrent = identity('user_concurrent', 'concurrent@example.com')
     const outcomes = await Promise.all([execute(concurrent, undefined, [], 'client'), execute(concurrent, undefined, [], 'client')])
     assert.equal(outcomes.length, 2)
-    assert.equal((await db.query('SELECT count(*)::int AS count FROM soundstage.profiles WHERE clerk_user_id=$1', [concurrent.id])).rows[0].count, 1)
+    assert.equal((await db.query('SELECT count(*)::int AS count FROM soundstage.users WHERE clerk_user_id=$1', [concurrent.id])).rows[0].count, 1)
     assert.equal(mirrors.filter(item => item.id === concurrent.id).length, 1)
 
-    await db.query("UPDATE soundstage.profiles SET status='suspended' WHERE clerk_user_id=$1", [concurrent.id])
+    await db.query("UPDATE soundstage.users SET status='suspended' WHERE clerk_user_id=$1", [concurrent.id])
     await assert.rejects(execute(concurrent), error => error.status === 403 && /suspended/.test(error.message))
   } finally { await db.close() }
 })
 
-test('a profile email conflict is denied instead of merging Clerk identities', async () => {
+test('an email already linked to another Clerk account is denied instead of merging', async () => {
   const { db, execute } = await setup()
   try {
-    await db.query('INSERT INTO soundstage.profiles(clerk_user_id,email,role) VALUES ($1,$2,$3)', ['user_existing', 'same@example.com', 'client'])
+    await db.query("INSERT INTO soundstage.users(clerk_user_id,email,role) VALUES ('user_existing','same@example.com','client')")
     await assert.rejects(execute(identity('user_other', 'same@example.com')), error => error.status === 409 && /linked to another account/.test(error.message))
-    assert.equal((await db.query("SELECT count(*)::int AS count FROM soundstage.profiles WHERE email='same@example.com'")).rows[0].count, 1)
-  } finally { await db.close() }
-})
-
-test('migrated Supabase sessions are denied and former Supabase admins can use Clerk', async () => {
-  const { db, execute } = await setup()
-  try {
-    const authId = '00000000-0000-0000-0000-000000000090'
-    const email = 'migrated-admin@example.com'
-    await db.query('INSERT INTO auth.users(id) VALUES ($1)', [authId])
-    await db.query('INSERT INTO soundstage.identities(auth_id,email,role) VALUES ($1,$2,$3)', [authId, email, 'admin'])
-    await db.query('INSERT INTO soundstage.profiles(clerk_user_id,email,role) VALUES ($1,$2,$3)', ['user_migrated_admin', email, 'admin'])
-    const supabaseUser = { id: authId, email, email_confirmed_at: '2026-01-01', app_metadata: { role: 'admin' }, user_metadata: {} }
-    await assert.rejects(execute(supabaseUser), error => error.status === 403 && /new sign-in/.test(error.message))
-
-    const clerkUser = identity('user_migrated_admin', email)
-    const response = await execute(clerkUser)
-    assert.equal(JSON.parse(response.session['soundstage-session']).role, 'admin')
+    assert.equal((await db.query("SELECT count(*)::int AS count FROM soundstage.users WHERE email='same@example.com'")).rows[0].count, 1)
   } finally { await db.close() }
 })

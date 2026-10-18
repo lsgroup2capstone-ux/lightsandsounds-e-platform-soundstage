@@ -1,219 +1,262 @@
--- SoundStage / Supabase PostgreSQL. Run as the project database owner.
--- This migration never drops existing tables or imports browser passwords.
+-- SoundStage database: the 11 core tables (data dictionary Tables 3-13).
+-- Safe to run again: it creates only what is missing and never drops data.
+-- Existing Supabase databases are moved here once with database/migrate-to-core-tables.sql.
 BEGIN;
 SELECT pg_advisory_xact_lock(74832019);
+CREATE EXTENSION IF NOT EXISTS btree_gist;
 CREATE SCHEMA IF NOT EXISTS soundstage;
 REVOKE ALL ON SCHEMA soundstage FROM PUBLIC, anon, authenticated;
-CREATE TABLE IF NOT EXISTS soundstage.schema_versions (
-  version integer PRIMARY KEY,
-  applied_at timestamptz NOT NULL DEFAULT now()
+
+-- Rows of money and audit tables are never changed or deleted.
+CREATE OR REPLACE FUNCTION soundstage.reject_change() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION '% rows cannot be %', TG_TABLE_NAME, lower(TG_OP) || 'd';
+END $$;
+
+-- Table 3: users. Passwords are kept by Clerk, never in this table.
+CREATE TABLE IF NOT EXISTS soundstage.users (
+  user_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  clerk_user_id varchar(64) UNIQUE CHECK (clerk_user_id LIKE 'user_%'),
+  first_name varchar(100) NOT NULL DEFAULT '',
+  middle_name varchar(100),
+  last_name varchar(100) NOT NULL DEFAULT '',
+  email varchar(254) NOT NULL UNIQUE CHECK (email = lower(email) AND email LIKE '%_@_%'),
+  username varchar(100) UNIQUE,
+  phone_number varchar(20),
+  role varchar(50) NOT NULL CHECK (role IN ('client', 'provider', 'payroll_master', 'admin')),
+  status varchar(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'deactivated')),
+  business_name varchar(200),
+  bio text,
+  profile_image text,
+  -- Provider verification (admin approval) and the two required documents (private file keys).
+  verification_status varchar(20) CHECK (verification_status IN ('pending', 'approved', 'rejected')),
+  verification_reason text,
+  business_permit text,
+  valid_id text,
+  email_notifications boolean NOT NULL DEFAULT true,
+  date_created timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CHECK (role = 'provider' OR verification_status IS NULL)
 );
-CREATE TABLE IF NOT EXISTS soundstage.identities (
-  auth_id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE RESTRICT,
-  email text NOT NULL UNIQUE CHECK (email = lower(email)),
-  role text NOT NULL CHECK (role IN ('client', 'provider', 'admin')),
-  created_at timestamptz NOT NULL DEFAULT now()
-);
--- JSONB preserves the existing application's nested booking/refund/document records.
-CREATE TABLE IF NOT EXISTS soundstage.clerk_identities (
-  clerk_id text PRIMARY KEY CHECK (clerk_id LIKE 'user_%'),
-  email text NOT NULL UNIQUE CHECK (email = lower(email)),
-  role text NOT NULL CHECK (role IN ('client', 'provider')),
-  created_at timestamptz NOT NULL DEFAULT now()
-);
-ALTER TABLE soundstage.clerk_identities ENABLE ROW LEVEL SECURITY;
-CREATE TABLE IF NOT EXISTS soundstage.profiles (
-  clerk_user_id text PRIMARY KEY CHECK (clerk_user_id LIKE 'user_%'),
-  email text NOT NULL UNIQUE CHECK (email = lower(email)),
-  first_name text NOT NULL DEFAULT '',
-  last_name text NOT NULL DEFAULT '',
-  phone text NOT NULL DEFAULT '',
-  role text NOT NULL CHECK (role IN ('client', 'provider', 'payroll_master', 'admin')),
-  status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'deactivated')),
+
+-- Table 4: service packages.
+CREATE TABLE IF NOT EXISTS soundstage.service_packages (
+  package_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  provider_id bigint NOT NULL REFERENCES soundstage.users(user_id) ON DELETE RESTRICT,
+  name varchar(100) NOT NULL,
+  description text NOT NULL DEFAULT '',
+  price decimal(10,2) NOT NULL CHECK (price >= 0),
+  inclusions text NOT NULL DEFAULT '',
+  category varchar(50) CHECK (category IN ('Sound System', 'Lighting', 'Full Production', 'Band & Stage')),
+  location varchar(200) NOT NULL DEFAULT '',
+  coverage_areas text NOT NULL DEFAULT '',
+  transportation_fee decimal(10,2) NOT NULL DEFAULT 0 CHECK (transportation_fee >= 0),
+  image text,
+  is_active boolean NOT NULL DEFAULT true,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
-ALTER TABLE soundstage.profiles ENABLE ROW LEVEL SECURITY;
-INSERT INTO soundstage.profiles (clerk_user_id, email, role, created_at)
-SELECT clerk_id, email, role, created_at FROM soundstage.clerk_identities
-ON CONFLICT DO NOTHING;
--- Signup OTP state is private to the server; never exposed by the Data API.
-CREATE TABLE IF NOT EXISTS soundstage.signup_phone_verifications (
-  auth_id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  phone text NOT NULL CHECK (phone ~ '^\+639[0-9]{9}$'),
-  nonce text NOT NULL,
-  otp_digest text,
-  expires_at timestamptz NOT NULL,
-  sent_at timestamptz NOT NULL,
-  window_started_at timestamptz NOT NULL,
-  send_count integer NOT NULL DEFAULT 1 CHECK (send_count > 0),
-  attempts integer NOT NULL DEFAULT 0 CHECK (attempts BETWEEN 0 AND 5),
-  delivered boolean NOT NULL DEFAULT false,
-  verified_at timestamptz
-);
-CREATE INDEX IF NOT EXISTS signup_phone_rate_limit_idx ON soundstage.signup_phone_verifications(phone, window_started_at);
-ALTER TABLE soundstage.signup_phone_verifications ENABLE ROW LEVEL SECURITY;
--- Keys identify collections and their owners; only the authenticated server API may
--- read or modify these records. This schema is intentionally not exposed by PostgREST.
-CREATE TABLE IF NOT EXISTS soundstage.records (
-  key text PRIMARY KEY CHECK (key LIKE 'soundstage-%'),
-  value jsonb NOT NULL,
-  updated_at timestamptz NOT NULL DEFAULT now()
-);
-ALTER TABLE soundstage.identities ENABLE ROW LEVEL SECURITY;
-ALTER TABLE soundstage.records ENABLE ROW LEVEL SECURITY;
-ALTER TABLE soundstage.schema_versions ENABLE ROW LEVEL SECURITY;
--- Relational bookings (booking-schedule plan 1). The database itself prevents
--- double-booking, invalid statuses, history edits and snapshot edits.
-CREATE EXTENSION IF NOT EXISTS btree_gist;
+CREATE INDEX IF NOT EXISTS service_packages_provider_idx ON soundstage.service_packages(provider_id);
+
+-- Table 5: bookings. Includes the client's reschedule/cancellation request, the
+-- client's report about the booking, and the payroll master's payout to the provider.
 CREATE TABLE IF NOT EXISTS soundstage.bookings (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  idempotency_key text UNIQUE,
-  client_email text NOT NULL CHECK (client_email = lower(client_email)),
-  provider_email text NOT NULL CHECK (provider_email = lower(provider_email)),
-  package_id text,
-  package_name text NOT NULL,
-  package_inclusions jsonb NOT NULL DEFAULT '[]'::jsonb,
-  package_price numeric(12,2) NOT NULL CHECK (package_price >= 0),
-  base_price numeric(12,2),
-  transportation_fee numeric(12,2),
-  total numeric(12,2),
-  start_date date NOT NULL,
-  end_date date NOT NULL,
-  event_time text,
-  event_type text,
-  location text,
-  event_town text,
-  guests integer,
+  booking_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  client_id bigint NOT NULL REFERENCES soundstage.users(user_id) ON DELETE RESTRICT,
+  provider_id bigint NOT NULL REFERENCES soundstage.users(user_id) ON DELETE RESTRICT,
+  package_id bigint NOT NULL REFERENCES soundstage.service_packages(package_id) ON DELETE RESTRICT,
+  event_date date NOT NULL,
+  duration_days smallint NOT NULL DEFAULT 1 CHECK (duration_days BETWEEN 1 AND 30),
+  event_time time,
+  end_time time,
+  location varchar(150),
+  event_town varchar(100),
+  event_type varchar(100),
+  guests integer CHECK (guests >= 0),
   notes text,
-  image text,
-  status text NOT NULL CHECK (status IN ('pending', 'accepted', 'awaiting_payment', 'confirmed', 'in_progress', 'completed', 'declined', 'cancelled', 'refund_pending', 'refunded')),
+  -- Copied when booked so later package edits never change this booking.
+  package_name varchar(100) NOT NULL,
+  package_price decimal(10,2) NOT NULL CHECK (package_price >= 0),
+  transportation_fee decimal(10,2) NOT NULL DEFAULT 0 CHECK (transportation_fee >= 0),
+  total_amount decimal(10,2) NOT NULL CHECK (total_amount >= 0),
+  status varchar(50) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'awaiting_payment', 'confirmed', 'in_progress', 'completed', 'declined', 'cancelled', 'refund_pending', 'refunded')),
   hold_expires_at timestamptz,
-  cancelled_by text,
-  feedback jsonb,
-  legacy_id text UNIQUE,
+  cancelled_by varchar(20) CHECK (cancelled_by IN ('client', 'provider', 'system')),
+  cancel_reason text,
+  request_type varchar(20) CHECK (request_type IN ('reschedule', 'cancellation')),
+  request_status varchar(20) CHECK (request_status IN ('pending', 'approved', 'declined')),
+  request_reason text,
+  requested_date date,
+  requested_duration_days smallint CHECK (requested_duration_days BETWEEN 1 AND 30),
+  report_reason varchar(500),
+  report_details text,
+  report_status varchar(20) CHECK (report_status IN ('pending', 'resolved')),
+  reported_at timestamptz,
+  payout_status varchar(20) CHECK (payout_status IN ('pending', 'paid')),
+  payout_amount decimal(10,2) CHECK (payout_amount >= 0),
+  payout_reference varchar(100),
+  paid_out_by bigint REFERENCES soundstage.users(user_id) ON DELETE RESTRICT,
+  paid_out_at timestamptz,
+  idempotency_key varchar(100) UNIQUE,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  CHECK (end_date > start_date)
+  CHECK (client_id <> provider_id),
+  CHECK ((request_type IS NULL) = (request_status IS NULL)),
+  CHECK (request_type <> 'reschedule' OR requested_date IS NOT NULL),
+  CHECK ((report_reason IS NULL) = (report_status IS NULL)),
+  CHECK (payout_status <> 'paid' OR (payout_amount IS NOT NULL AND payout_reference IS NOT NULL AND paid_out_at IS NOT NULL)),
+  -- A provider can never have two confirmed events on the same day.
+  EXCLUDE USING gist (provider_id WITH =, daterange(event_date, event_date + duration_days) WITH &&) WHERE (status IN ('confirmed', 'in_progress'))
 );
-CREATE INDEX IF NOT EXISTS bookings_provider_email_idx ON soundstage.bookings(provider_email);
-CREATE INDEX IF NOT EXISTS bookings_client_email_idx ON soundstage.bookings(client_email);
+CREATE INDEX IF NOT EXISTS bookings_client_idx ON soundstage.bookings(client_id);
+CREATE INDEX IF NOT EXISTS bookings_provider_idx ON soundstage.bookings(provider_id);
 CREATE INDEX IF NOT EXISTS bookings_status_idx ON soundstage.bookings(status);
-DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'bookings_no_overlap') THEN
-    ALTER TABLE soundstage.bookings ADD CONSTRAINT bookings_no_overlap
-      EXCLUDE USING gist (provider_email WITH =, daterange(start_date, end_date) WITH &&)
-      WHERE (status IN ('confirmed', 'in_progress'));
-  END IF;
-END $$;
-ALTER TABLE soundstage.bookings ENABLE ROW LEVEL SECURITY;
-CREATE TABLE IF NOT EXISTS soundstage.booking_status_history (
-  id bigserial PRIMARY KEY,
-  booking_id uuid NOT NULL REFERENCES soundstage.bookings(id) ON DELETE RESTRICT,
-  old_status text,
-  new_status text NOT NULL,
-  actor_id text,
-  actor_role text NOT NULL CHECK (actor_role IN ('client', 'provider', 'admin', 'payroll_master', 'system')),
-  reason text,
-  created_at timestamptz NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS booking_status_history_booking_idx ON soundstage.booking_status_history(booking_id);
-ALTER TABLE soundstage.booking_status_history ENABLE ROW LEVEL SECURITY;
-CREATE TABLE IF NOT EXISTS soundstage.availability_schedules (
-  id bigserial PRIMARY KEY,
-  provider_email text NOT NULL CHECK (provider_email = lower(provider_email)),
-  kind text NOT NULL CHECK (kind IN ('weekly', 'blocked')),
+
+-- Table 6: schedules. A dated row blocks or opens one day; a weekday row is a weekly working day.
+CREATE TABLE IF NOT EXISTS soundstage.schedules (
+  schedule_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  provider_id bigint NOT NULL REFERENCES soundstage.users(user_id) ON DELETE CASCADE,
+  available_date date,
   weekday smallint CHECK (weekday BETWEEN 0 AND 6),
-  blocked_date date,
+  time_slot varchar(50),
+  is_available boolean NOT NULL DEFAULT false,
+  CHECK ((available_date IS NULL) <> (weekday IS NULL)),
+  UNIQUE (provider_id, available_date),
+  UNIQUE (provider_id, weekday)
+);
+
+-- Table 9: subscriptions. The 7-day trial is a row with plan_type 'Trial';
+-- a plan waiting for its payment to be verified is 'pending'.
+CREATE TABLE IF NOT EXISTS soundstage.subscriptions (
+  subscription_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  provider_id bigint NOT NULL REFERENCES soundstage.users(user_id) ON DELETE RESTRICT,
+  plan_type varchar(20) NOT NULL CHECK (plan_type IN ('Trial', 'Starter', 'Pro', 'Studio')),
+  price decimal(10,2) NOT NULL DEFAULT 0 CHECK (price >= 0),
+  start_date date NOT NULL,
+  end_date date NOT NULL,
+  status varchar(20) NOT NULL CHECK (status IN ('pending', 'trial', 'active', 'expired', 'cancelled')),
   created_at timestamptz NOT NULL DEFAULT now(),
-  CHECK ((kind = 'weekly' AND weekday IS NOT NULL AND blocked_date IS NULL) OR (kind = 'blocked' AND blocked_date IS NOT NULL AND weekday IS NULL))
+  CHECK (end_date >= start_date)
 );
-CREATE UNIQUE INDEX IF NOT EXISTS availability_weekly_unique ON soundstage.availability_schedules(provider_email, weekday) WHERE kind = 'weekly';
-CREATE UNIQUE INDEX IF NOT EXISTS availability_blocked_unique ON soundstage.availability_schedules(provider_email, blocked_date) WHERE kind = 'blocked';
-ALTER TABLE soundstage.availability_schedules ENABLE ROW LEVEL SECURITY;
-CREATE TABLE IF NOT EXISTS soundstage.reschedule_requests (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  booking_id uuid NOT NULL REFERENCES soundstage.bookings(id) ON DELETE RESTRICT,
-  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'declined')),
-  new_start_date date NOT NULL,
-  new_end_date date NOT NULL,
-  requested_by text NOT NULL,
-  decided_by text,
-  decided_at timestamptz,
-  reason text,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  CHECK (new_end_date > new_start_date)
-);
-CREATE UNIQUE INDEX IF NOT EXISTS reschedule_one_pending ON soundstage.reschedule_requests(booking_id) WHERE status = 'pending';
-ALTER TABLE soundstage.reschedule_requests ENABLE ROW LEVEL SECURITY;
-CREATE TABLE IF NOT EXISTS soundstage.cancellation_requests (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  booking_id uuid NOT NULL REFERENCES soundstage.bookings(id) ON DELETE RESTRICT,
-  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'declined')),
-  requested_by text NOT NULL,
-  decided_by text,
-  decided_at timestamptz,
-  reason text,
-  created_at timestamptz NOT NULL DEFAULT now()
-);
-CREATE UNIQUE INDEX IF NOT EXISTS cancellation_one_pending ON soundstage.cancellation_requests(booking_id) WHERE status = 'pending';
-ALTER TABLE soundstage.cancellation_requests ENABLE ROW LEVEL SECURITY;
-CREATE OR REPLACE FUNCTION soundstage.history_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
-BEGIN
-  RAISE EXCEPTION 'booking_status_history is append-only';
-END $$;
-DROP TRIGGER IF EXISTS booking_status_history_append_only ON soundstage.booking_status_history;
-CREATE TRIGGER booking_status_history_append_only BEFORE UPDATE OR DELETE ON soundstage.booking_status_history
-  FOR EACH ROW EXECUTE FUNCTION soundstage.history_append_only();
-CREATE OR REPLACE FUNCTION soundstage.booking_snapshot_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
-BEGIN
-  IF NEW.package_name IS DISTINCT FROM OLD.package_name
-    OR NEW.package_inclusions IS DISTINCT FROM OLD.package_inclusions
-    OR NEW.package_price IS DISTINCT FROM OLD.package_price THEN
-    RAISE EXCEPTION 'booking package snapshot is immutable';
-  END IF;
-  RETURN NEW;
-END $$;
-DROP TRIGGER IF EXISTS bookings_snapshot_immutable ON soundstage.bookings;
-CREATE TRIGGER bookings_snapshot_immutable BEFORE UPDATE ON soundstage.bookings
-  FOR EACH ROW EXECUTE FUNCTION soundstage.booking_snapshot_immutable();
+CREATE INDEX IF NOT EXISTS subscriptions_provider_idx ON soundstage.subscriptions(provider_id);
+
+-- Table 7: payments (bookings and subscriptions). Never deleted.
 CREATE TABLE IF NOT EXISTS soundstage.payments (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  target_kind text NOT NULL CHECK (target_kind IN ('booking', 'subscription')),
-  target_id text NOT NULL,
-  owner_email text NOT NULL CHECK (owner_email = lower(owner_email)),
-  type text NOT NULL CHECK (type IN ('downpayment', 'full', 'balance', 'subscription')),
-  plan text,
-  amount numeric(12,2) NOT NULL CHECK (amount > 0),
-  refunded_amount numeric(12,2) NOT NULL DEFAULT 0 CHECK (refunded_amount >= 0),
-  currency text NOT NULL DEFAULT 'PHP' CHECK (currency = 'PHP'),
-  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'paid', 'failed', 'expired', 'review', 'partially_refunded', 'refunded')),
-  checkout_session_id text UNIQUE,
+  payment_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  booking_id bigint REFERENCES soundstage.bookings(booking_id) ON DELETE RESTRICT,
+  subscription_id bigint REFERENCES soundstage.subscriptions(subscription_id) ON DELETE RESTRICT,
+  user_id bigint NOT NULL REFERENCES soundstage.users(user_id) ON DELETE RESTRICT,
+  amount decimal(10,2) NOT NULL CHECK (amount > 0),
+  payment_type varchar(50) NOT NULL CHECK (payment_type IN ('downpayment', 'full', 'balance', 'subscription')),
+  payment_method varchar(50),
+  payment_status varchar(50) NOT NULL DEFAULT 'pending' CHECK (payment_status IN ('pending', 'paid', 'failed', 'expired', 'review', 'partially_refunded', 'refunded')),
+  reference_number varchar(100),
+  checkout_session_id varchar(100) UNIQUE,
   checkout_url text,
-  method text,
-  provider_reference text,
+  refunded_amount decimal(10,2) NOT NULL DEFAULT 0 CHECK (refunded_amount >= 0),
   review_reason text,
-  legacy_id text UNIQUE,
   paid_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CHECK ((booking_id IS NULL) <> (subscription_id IS NULL)),
+  CHECK ((payment_type = 'subscription') = (subscription_id IS NOT NULL)),
+  CHECK (refunded_amount <= amount)
 );
-CREATE UNIQUE INDEX IF NOT EXISTS payments_one_pending ON soundstage.payments(target_id, type) WHERE status = 'pending';
-CREATE INDEX IF NOT EXISTS payments_target_idx ON soundstage.payments(target_id);
-CREATE INDEX IF NOT EXISTS payments_owner_idx ON soundstage.payments(owner_email);
-ALTER TABLE soundstage.payments ENABLE ROW LEVEL SECURITY;
-CREATE TABLE IF NOT EXISTS soundstage.payment_events (
-  id text PRIMARY KEY,
-  type text NOT NULL,
-  payment_id uuid REFERENCES soundstage.payments(id) ON DELETE RESTRICT,
-  received_at timestamptz NOT NULL DEFAULT now()
+CREATE INDEX IF NOT EXISTS payments_booking_idx ON soundstage.payments(booking_id);
+CREATE INDEX IF NOT EXISTS payments_user_idx ON soundstage.payments(user_id);
+-- One open checkout per booking and payment type.
+CREATE UNIQUE INDEX IF NOT EXISTS payments_one_pending ON soundstage.payments(booking_id, payment_type) WHERE payment_status = 'pending' AND booking_id IS NOT NULL;
+DROP TRIGGER IF EXISTS payments_no_delete ON soundstage.payments;
+CREATE TRIGGER payments_no_delete BEFORE DELETE ON soundstage.payments FOR EACH ROW EXECUTE FUNCTION soundstage.reject_change();
+
+-- Table 8: feedback. One review per booking, never edited.
+CREATE TABLE IF NOT EXISTS soundstage.feedback (
+  feedback_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  booking_id bigint NOT NULL UNIQUE REFERENCES soundstage.bookings(booking_id) ON DELETE RESTRICT,
+  client_id bigint NOT NULL REFERENCES soundstage.users(user_id) ON DELETE RESTRICT,
+  provider_id bigint NOT NULL REFERENCES soundstage.users(user_id) ON DELETE RESTRICT,
+  rating smallint NOT NULL CHECK (rating BETWEEN 1 AND 5),
+  comment text NOT NULL CHECK (char_length(btrim(comment)) BETWEEN 1 AND 2000),
+  created_at timestamptz NOT NULL DEFAULT now()
 );
-ALTER TABLE soundstage.payment_events ENABLE ROW LEVEL SECURITY;
+CREATE INDEX IF NOT EXISTS feedback_provider_idx ON soundstage.feedback(provider_id);
+DROP TRIGGER IF EXISTS feedback_no_change ON soundstage.feedback;
+CREATE TRIGGER feedback_no_change BEFORE UPDATE OR DELETE ON soundstage.feedback FOR EACH ROW EXECUTE FUNCTION soundstage.reject_change();
+
+-- Table 10: messages. Client-provider chat about a booking.
+CREATE TABLE IF NOT EXISTS soundstage.messages (
+  message_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  booking_id bigint NOT NULL REFERENCES soundstage.bookings(booking_id) ON DELETE RESTRICT,
+  sender_id bigint NOT NULL REFERENCES soundstage.users(user_id) ON DELETE RESTRICT,
+  body text NOT NULL CHECK (char_length(btrim(body)) BETWEEN 1 AND 4000),
+  is_read boolean NOT NULL DEFAULT false,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS messages_booking_idx ON soundstage.messages(booking_id, created_at);
+
+-- Table 11: refunds. Requested by the client, decided by the payroll master. Never deleted.
+CREATE TABLE IF NOT EXISTS soundstage.refunds (
+  refund_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  booking_id bigint NOT NULL REFERENCES soundstage.bookings(booking_id) ON DELETE RESTRICT,
+  client_id bigint NOT NULL REFERENCES soundstage.users(user_id) ON DELETE RESTRICT,
+  amount decimal(10,2) NOT NULL CHECK (amount > 0),
+  reason text NOT NULL DEFAULT '',
+  payout_method varchar(50) NOT NULL CHECK (payout_method IN ('GCash', 'Maya', 'Bank transfer')),
+  payout_account varchar(200) NOT NULL,
+  status varchar(20) NOT NULL DEFAULT 'requested' CHECK (status IN ('requested', 'approved', 'completed', 'rejected')),
+  remarks text,
+  reference_number varchar(100),
+  decided_by bigint REFERENCES soundstage.users(user_id) ON DELETE RESTRICT,
+  requested_at timestamptz NOT NULL DEFAULT now(),
+  decided_at timestamptz,
+  completed_at timestamptz,
+  CHECK (status <> 'completed' OR (reference_number IS NOT NULL AND completed_at IS NOT NULL)),
+  CHECK (status <> 'rejected' OR remarks IS NOT NULL)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS refunds_one_open ON soundstage.refunds(booking_id) WHERE status IN ('requested', 'approved');
+DROP TRIGGER IF EXISTS refunds_no_delete ON soundstage.refunds;
+CREATE TRIGGER refunds_no_delete BEFORE DELETE ON soundstage.refunds FOR EACH ROW EXECUTE FUNCTION soundstage.reject_change();
+
+-- Table 12: notifications shown in each user's bell.
+CREATE TABLE IF NOT EXISTS soundstage.notifications (
+  notification_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  user_id bigint NOT NULL REFERENCES soundstage.users(user_id) ON DELETE CASCADE,
+  type varchar(50) NOT NULL,
+  title varchar(200) NOT NULL,
+  message text NOT NULL DEFAULT '',
+  link varchar(500) CHECK (link LIKE '/%'),
+  is_read boolean NOT NULL DEFAULT false,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS notifications_user_idx ON soundstage.notifications(user_id, created_at DESC);
+
+-- Table 13: audit log. Who did what and when (approvals, refunds, payouts, status changes). Append-only.
+CREATE TABLE IF NOT EXISTS soundstage.audit_log (
+  audit_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  user_id bigint REFERENCES soundstage.users(user_id) ON DELETE RESTRICT,
+  actor_role varchar(50) NOT NULL CHECK (actor_role IN ('client', 'provider', 'payroll_master', 'admin', 'system')),
+  action varchar(100) NOT NULL,
+  table_name varchar(50) NOT NULL,
+  record_id varchar(100) NOT NULL,
+  old_value text,
+  new_value text,
+  reason text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS audit_log_record_idx ON soundstage.audit_log(table_name, record_id);
+CREATE INDEX IF NOT EXISTS audit_log_created_idx ON soundstage.audit_log(created_at);
+DROP TRIGGER IF EXISTS audit_log_no_change ON soundstage.audit_log;
+CREATE TRIGGER audit_log_no_change BEFORE UPDATE OR DELETE ON soundstage.audit_log FOR EACH ROW EXECUTE FUNCTION soundstage.reject_change();
+
+-- Private to the server: browser roles get no access (the app connects as the database owner).
+DO $$
+DECLARE t text;
+BEGIN
+  FOR t IN SELECT tablename FROM pg_tables WHERE schemaname = 'soundstage' LOOP
+    EXECUTE format('ALTER TABLE soundstage.%I ENABLE ROW LEVEL SECURITY', t);
+  END LOOP;
+END $$;
 REVOKE ALL ON ALL TABLES IN SCHEMA soundstage FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA soundstage FROM PUBLIC, anon, authenticated;
 ALTER DEFAULT PRIVILEGES IN SCHEMA soundstage REVOKE ALL ON TABLES FROM PUBLIC, anon, authenticated;
-INSERT INTO soundstage.schema_versions(version) VALUES (1) ON CONFLICT DO NOTHING;
-INSERT INTO soundstage.schema_versions(version) VALUES (2) ON CONFLICT DO NOTHING;
-INSERT INTO soundstage.schema_versions(version) VALUES (3) ON CONFLICT DO NOTHING;
-INSERT INTO soundstage.schema_versions(version) VALUES (4) ON CONFLICT DO NOTHING;
-INSERT INTO soundstage.schema_versions(version) VALUES (5) ON CONFLICT DO NOTHING;
 COMMIT;
