@@ -326,12 +326,13 @@ BEGIN
     JOIN soundstage.users u ON u.role = 'provider' AND u.email = lower(btrim(p->>'email'))
     WHERE r.key = 'soundstage-marketplace-v1' AND (p->>'amount')::numeric > 0
       AND EXISTS (SELECT 1 FROM soundstage.subscriptions sb WHERE sb.provider_id = u.user_id);
-    -- Earlier activity entries.
-    INSERT INTO soundstage.audit_log (actor_role, action, table_name, record_id, old_value, new_value, reason, created_at)
-    SELECT 'system', left(coalesce(a->>'action', 'Activity'), 100), 'legacy', left(coalesce(nullif(a->>'target', ''), '-'), 100), a->>'before', a->>'after',
-      'Recorded by ' || coalesce(a->>'actor', 'unknown'), coalesce((a->>'at')::timestamptz, now())
+    -- Earlier activity entries; the person is matched by the email in the entry's actor text.
+    INSERT INTO soundstage.audit_log (user_id, actor_role, action, table_name, record_id, old_value, new_value, reason, created_at)
+    SELECT u.user_id, coalesce(u.role, 'system'), left(coalesce(a->>'action', 'Activity'), 100), 'legacy', left(coalesce(nullif(a->>'target', ''), '-'), 100), a->>'before', a->>'after',
+      CASE WHEN u.user_id IS NULL THEN 'Recorded by ' || coalesce(a->>'actor', 'unknown') END, coalesce((a->>'at')::timestamptz, now())
     FROM soundstage.records r
     CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(r.value->'audit') = 'array' THEN r.value->'audit' ELSE '[]'::jsonb END) WITH ORDINALITY AS e(a, n)
+    LEFT JOIN soundstage.users u ON u.email = lower(substring(a->>'actor' FROM '\(([^()[:space:]]+@[^()[:space:]]+)\)'))
     WHERE r.key = 'soundstage-marketplace-v1'
     ORDER BY e.n DESC;
   END IF;

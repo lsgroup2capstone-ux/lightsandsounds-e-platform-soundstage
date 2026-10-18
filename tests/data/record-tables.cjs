@@ -101,7 +101,7 @@ test('the Supabase migration copies the old data, deletes the old tables and mat
     const records = {
       'soundstage-accounts-v2': [{ email: 'c@x.com', role: 'client', firstName: 'Cy', lastName: 'Client', mobile: '0917' }, { email: provider, role: 'provider', firstName: 'Fran', lastName: 'P', business: 'Fran Sounds',
         application: { status: 'Approved', documents: [{ key: 'private/provider-docs/a/permit.pdf' }, { key: 'private/provider-docs/a/id.png' }] } }, { email: 'legacy@x.com', role: 'client', firstName: 'Old', lastName: 'Account' }],
-      'soundstage-marketplace-v1': { subscriptions: [{ email: provider, trialStart: iso(now - 2 * 864e5), trialEnd: iso(now + 5 * 864e5) }], payments: [], audit: [{ id: 'a1', actor: 'admin', action: 'Provider application reviewed', target: provider, before: 'Pending', after: 'Approved', at: iso(now) }] },
+      'soundstage-marketplace-v1': { subscriptions: [{ email: provider, trialStart: iso(now - 2 * 864e5), trialEnd: iso(now + 5 * 864e5) }], payments: [], audit: [{ id: 'a2', actor: 'someone without an email', action: 'Old entry', target: 'x', at: iso(now - 864e5) }, { id: 'a1', actor: 'admin: Admin (admin@x.com)', action: 'Provider application reviewed', target: provider, before: 'Pending', after: 'Approved', at: iso(now) }] },
       'soundstage-provider-services-v2:fran%2Bprovider1%40gmail.com': [{ id: 'svc-1', name: 'Pro Sound', price: 15000, location: 'Balayan', coverageAreas: 'Balayan', active: true, category: 'Sound System' }],
       'soundstage-schedule:fran%2Bprovider1%40gmail.com': ['2027-01-02'],
     }
@@ -115,7 +115,9 @@ test('the Supabase migration copies the old data, deletes the old tables and mat
     assert.deepEqual((await db.query('SELECT name, price::float AS price, category, is_active FROM soundstage.service_packages')).rows, [{ name: 'Pro Sound', price: 15000, category: 'Sound System', is_active: true }])
     assert.deepEqual((await db.query('SELECT plan_type, status FROM soundstage.subscriptions')).rows, [{ plan_type: 'Trial', status: 'trial' }])
     assert.deepEqual((await db.query("SELECT to_char(available_date,'YYYY-MM-DD') AS d FROM soundstage.schedules")).rows, [{ d: '2027-01-02' }])
-    assert.equal((await db.query('SELECT count(*)::int AS n FROM soundstage.audit_log')).rows[0].n, 1)
+    // The person in each old entry is linked by email; entries without one keep the text in reason.
+    assert.deepEqual((await db.query('SELECT u.email, a.actor_role, a.reason FROM soundstage.audit_log a LEFT JOIN soundstage.users u ON u.user_id = a.user_id ORDER BY a.audit_id')).rows,
+      [{ email: 'admin@x.com', actor_role: 'admin', reason: null }, { email: null, actor_role: 'system', reason: 'Recorded by someone without an email' }])
     for (const old of ['records', 'profiles', 'identities', 'clerk_identities', 'signup_phone_verifications', 'schema_versions']) assert.equal((await db.query('SELECT to_regclass($1) IS NULL AS gone', ['soundstage.' + old])).rows[0].gone, true, old)
     // Running it twice stops before changing anything.
     await assert.rejects(db.exec(migration), /Already migrated/)
