@@ -18,6 +18,10 @@ NEXT_PUBLIC_CLERK_SIGN_UP_URL=/auth/clerk/signup
 
 Use your actual port in authorized parties. Production requires production Clerk keys and the deployed origin. Keep the secret key server-only. Clerk sends the OTP emails; the legacy Supabase Gmail hook and PhilSMS settings do not control these messages. Clerk bot protection uses the captcha container in the signup form.
 
+## Unverified signups
+
+Submitting the signup form starts a Clerk sign-up attempt (`savePendingAccount` in `lib/auth/client-auth.ts`) so Clerk can send the email code. Clerk only creates a User once the code is verified, and unfinished attempts expire on Clerk's side. No `soundstage.profiles` row is created either, because the server only accepts sessions with a verified email (`authenticate` in `lib/server/data-service.ts`). An abandoned signup therefore leaves no user in Clerk or Supabase.
+
 ## Existing accounts
 
 Existing Supabase passwords are not imported into Clerk. Email/password login automatically tries Supabase when Clerk cannot find the account or rejects its password, then loads the saved server profile role. Existing clients and providers can keep using their original credentials. To move to Clerk, sign up with the **same email address**, choose a password, and verify email ownership (or use Google with the same verified email). The existing server-side identity mapping retains the application profile, role, bookings and provider application. Selecting another role does not overwrite an existing profile's role. Password reset works after that email is registered in Clerk; it cannot reset a Supabase-only password.

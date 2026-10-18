@@ -4,6 +4,7 @@ import { Inter } from 'next/font/google'
 import './globals.css'
 import { DataProvider } from '@/components/state/data-provider'
 import { ClerkProvider } from '@clerk/nextjs'
+import { IdleLogout } from '@/components/state/idle-logout'
 
 const inter = Inter({
   subsets: ['latin'],
@@ -39,6 +40,7 @@ export default function RootLayout({
         />
       </head>
       <body className="font-sans antialiased">
+        <IdleLogout />
         {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? (
           <ClerkProvider publishableKey={process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}>
             <DataProvider>{children}</DataProvider>

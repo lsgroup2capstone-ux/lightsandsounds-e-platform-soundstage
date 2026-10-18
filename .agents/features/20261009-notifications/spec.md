@@ -48,6 +48,7 @@ Facts found in the code:
 | New booking request | booking-schedule | Provider |
 | Booking accepted (with payment deadline) or declined (with reason) | booking-schedule | Client |
 | Payment confirmed | paymongo-payments | Client and provider |
+| New chat message from a client on a booking | communications | Provider |
 | Reschedule requested | booking-schedule | Provider |
 | Reschedule approved or declined | booking-schedule | Client |
 | Cancellation requested | booking-schedule | Provider |
@@ -99,3 +100,4 @@ Facts found in the code:
 ## Change log
 
 - 2026-10-09: revision 1 approved by the user.
+- 2026-10-17: Added "new chat message from a client → Provider" (user request). Interim: the existing client-side bell now shows providers their new bookings and client chat messages until this module replaces it.

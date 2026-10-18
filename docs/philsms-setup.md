@@ -65,7 +65,7 @@ The old signed `/api/auth/send-sms` endpoint remains for compatibility with any 
 ## Checks and troubleshooting
 
 ```powershell
-node --test tests/signup-sms.cjs tests/supabase-auth.cjs tests/postgres-schema.cjs
+node --test tests/auth/signup-sms.cjs tests/auth/supabase-auth.cjs tests/data/postgres-schema.cjs
 npm.cmd run typecheck
 ```
 
