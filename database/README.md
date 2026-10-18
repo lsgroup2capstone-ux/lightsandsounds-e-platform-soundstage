@@ -90,3 +90,18 @@ npm.cmd run build
 Tests execute the schema against embedded PostgreSQL, repeat migrations, verify access denial, run complete server workflows against PostgreSQL, check transaction rollback and concurrent booking conflicts, and exercise the existing approvals, billing, refunds, and activity behavior. They do not send real email or create cloud users. Run db:check after supplying the real connection string to verify the hosted project.
 
 References: [Database connections](https://supabase.com/docs/guides/database/connecting-to-postgres), [Auth email templates](https://supabase.com/docs/guides/auth/auth-email-templates), [Google sign-in](https://supabase.com/docs/guides/auth/social-login/auth-google).
+
+## Booking and payment migration (booking-schedule plan 5)
+
+Run this after `db:init` has created the booking and payment tables. It copies the JSON bookings, blocked dates and PayMongo records into the tables. The JSON records are never changed.
+
+~~~powershell
+npm.cmd run db:init
+npm.cmd run bookings:migrate                 # dry run: prints counts, unmappable and conflicting bookings, then rolls back
+npm.cmd run bookings:migrate -- --execute    # writes; safe to rerun (already-migrated rows are skipped)
+npm.cmd run bookings:migrate -- --export bookings-export.json   # emergency revert: table bookings as legacy JSON (read-only)
+~~~
+
+Run `--execute` locally first. Any other environment (shared or production) needs explicit approval from the project owner, after the dry-run counts and the `unmappable` and `conflicts` lists have been reviewed. Supabase may need the project owner to enable the `btree_gist` extension before `db:init`.
+
+The `--export` file covers bookings only. Blocked dates and PayMongo records are not exported, because the migration never changes their JSON copies: a code revert reads them as they were.

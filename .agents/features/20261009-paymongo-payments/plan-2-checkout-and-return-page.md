@@ -12,7 +12,7 @@ risk: high-risk
 - Feature: `.agents/features/20261009-paymongo-payments/spec.md`
 - Design: `.agents/features/20261009-booking-schedule/design.md`
 - Implements decisions: D5, D6 (checkout side), D7, D12
-- Spec revision: 3
+- Spec revision: 4
 - Depends on: payments plan 1
 - Status: plan-approved
 - Estimate: about 300 lines of diff
@@ -41,7 +41,7 @@ Booking and subscription checkouts are created only by server actions, with serv
   - Client owner only.
   - Reject `args.length > 3` or any extra amount argument (AC4).
   - Amount:
-    - `downpayment` = round(0.3 × `package_price`), only when `awaiting_payment` and nothing is paid.
+    - `downpayment` = round(0.3 × snapshot price), only when `awaiting_payment` and nothing is paid. Snapshot price = booking `total` (`package_price` when null), spec D7 rev 4.
     - `full` = price − paid, when `awaiting_payment`.
     - `balance` = price − paid, only when `confirmed` and the balance is above 0 (AC3, AC4).
 - `createSubscriptionCheckout`: same `startCheckout` with `targetKind:'subscription'`.

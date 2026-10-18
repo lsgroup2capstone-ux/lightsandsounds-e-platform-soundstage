@@ -1,6 +1,8 @@
 export type ServiceCategory = "Sound System" | "Lighting" | "Full Production" | "Band & Stage"
 
-export type BookingStatus = "Pending" | "Confirmed" | "Cancelled" | "Completed"
+// The ten table statuses (booking D4); the capitalized values remain for old data.
+export type BookingStatus = "pending" | "accepted" | "awaiting_payment" | "confirmed" | "in_progress" | "completed" | "declined" | "cancelled" | "refund_pending" | "refunded"
+  | "Pending" | "Confirmed" | "Cancelled" | "Completed"
 
 export type Location = "Balayan" | "Nasugbu" | "Lian"
 
@@ -60,6 +62,8 @@ export interface Booking {
   completedAt?: string
   cancelledBy?: "client" | "provider" | "admin"
   cancelledAt?: string
+  // Server-computed: the client may request a refund now (same rule as the refund transition).
+  refundEligible?: boolean
   refund?: { status: "Pending" | "Paid" | "Rejected"; amount: number; method: string; account: string; requestedAt: string; processedAt?: string; reference?: string; reason?: string }
   feedback?: { rating: number; comment: string; createdAt: string }
   paymentMethod?: string
@@ -258,4 +262,14 @@ export const statusStyles: Record<BookingStatus, { label: string; className: str
   Pending: { label: "Pending", className: "bg-warning/15 text-warning border-warning/30" },
   Cancelled: { label: "Cancelled", className: "bg-destructive/15 text-destructive border-destructive/30" },
   Completed: { label: "Completed", className: "bg-primary/15 text-primary border-primary/30" },
+  pending: { label: "Requested", className: "bg-warning/15 text-warning border-warning/30" },
+  accepted: { label: "Accepted", className: "bg-warning/15 text-warning border-warning/30" },
+  awaiting_payment: { label: "Awaiting payment", className: "bg-warning/15 text-warning border-warning/30" },
+  confirmed: { label: "Confirmed", className: "bg-success/15 text-success border-success/30" },
+  in_progress: { label: "In progress", className: "bg-primary/15 text-primary border-primary/30" },
+  completed: { label: "Completed", className: "bg-primary/15 text-primary border-primary/30" },
+  declined: { label: "Declined", className: "bg-destructive/15 text-destructive border-destructive/30" },
+  cancelled: { label: "Cancelled", className: "bg-destructive/15 text-destructive border-destructive/30" },
+  refund_pending: { label: "Refund pending", className: "bg-warning/15 text-warning border-warning/30" },
+  refunded: { label: "Refunded", className: "bg-muted text-muted-foreground border-border" },
 }

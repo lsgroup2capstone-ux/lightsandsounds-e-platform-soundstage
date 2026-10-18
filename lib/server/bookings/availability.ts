@@ -3,6 +3,7 @@ import { RequestError } from "../request-error"
 import type { Actor } from "./rules"
 
 const DAY = 86400000
+const MAX_RANGE_DAYS = 400
 const isoDate = /^\d{4}-\d{2}-\d{2}$/
 const dateText = (value: unknown) => value instanceof Date ? value.toISOString().slice(0, 10) : String(value).slice(0, 10)
 const addDays = (date: string, days: number) => new Date(Date.parse(date + "T00:00:00Z") + days * DAY).toISOString().slice(0, 10)
@@ -40,6 +41,8 @@ export async function toggleBlockedDate(actor: Actor, date: unknown) {
 
 // Dates in [fromDate, toDate) a client cannot book: blocked, non-working, or held by a blocking booking.
 export async function unavailableDates(providerEmail: string, fromDate: string, toDate: string) {
+  // Bounded range so a bad request cannot loop for long (review-3 M1).
+  if (validDate(fromDate) >= validDate(toDate) || Date.parse(toDate) - Date.parse(fromDate) > MAX_RANGE_DAYS * DAY) throw new RequestError("Choose a date range of up to 400 days.")
   const tx = currentTx()
   const email = providerEmail.toLowerCase()
   const schedule = await tx<{ kind: string; weekday: number | null; blocked_date: unknown }[]>`select kind, weekday, blocked_date from soundstage.availability_schedules where provider_email = ${email}`

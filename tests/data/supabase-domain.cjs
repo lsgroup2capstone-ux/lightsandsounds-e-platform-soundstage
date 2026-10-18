@@ -5,6 +5,25 @@ const load = require('../helpers/ts-loader.cjs')({ [require('node:path').resolve
 const { context } = load('lib/server/runtime.ts')
 const { MemoryStorage } = load('lib/data/memory-storage.ts')
 const { actions, visibleRecords, RequestError } = load('lib/server/data-service.ts')
+const { PGlite } = require('@electric-sql/pglite')
+const { btree_gist } = require('@electric-sql/pglite/contrib/btree_gist')
+// Checkouts now live in soundstage.payments, so actions that start one need a transaction.
+let database
+async function withTx(state) {
+  if (!database) {
+    database = new PGlite({ extensions: { btree_gist } })
+    await database.exec('CREATE ROLE anon; CREATE ROLE authenticated; CREATE SCHEMA auth; CREATE TABLE auth.users(id uuid PRIMARY KEY);')
+    await database.exec(require('node:fs').readFileSync('database/schema.sql', 'utf8'))
+  }
+  state.tx = async (parts, ...values) => (await database.query(parts.reduce((sql, part, i) => sql + (i ? '$' + i : '') + part, ''), values)).rows
+  return state
+}
+const core = () => load('lib/server/bookings/core.ts')
+const shift = days => new Date(Date.parse(core().manilaToday() + 'T00:00:00Z') + days * 86400000).toISOString().slice(0, 10)
+let keys = 0
+const book = (extra = {}) => actions.saveClientBooking({ ...input, idempotencyKey: 'sd-' + ++keys, ...extra })
+const paid = (id, amount, method = 'DEMO: PayMongo test: gcash') => database.query("INSERT INTO soundstage.payments (target_kind, target_id, owner_email, type, amount, status, method) VALUES ('booking', $1, 'client@test.com', 'downpayment', $2, 'paid', $3)", [id, amount, method])
+const ownView = async () => JSON.parse((await visibleRecords())['soundstage-client-bookings-v3:client%40test.com'] || '[]')
 const docs = [{ name: 'permit.pdf', type: 'application/pdf', data: 'data:application/pdf;base64,JVBERi0=' }]
 const client = { role: 'client', email: 'client@test.com', firstName: 'Test', lastName: 'Client', mobile: '123', authMethod: 'email' }
 const provider = { ...client, role: 'provider', email: 'provider@test.com', business: 'Events', application: { status: 'Approved', documents: docs, submittedAt: '2026-01-01' } }
@@ -23,44 +42,44 @@ function fixture(actor = client) {
 }
 const input = { id: 'forged', packageId: service.id, provider: 'Other', client: 'Fake', date: '2027-01-01', time: '6:00 PM', eventType: 'Wedding', location: 'Venue', eventTown: 'Balayan', guests: 10, durationDays: 1, total: 1, downpayment: 1, paid: true, status: 'Completed', paymentMethod: 'GCash' }
 test('server derives booking identity, price and status; checks collisions and ownership', async () => {
-  process.env.ENABLE_DEMO_PAYMENTS = 'true'
-  const state = fixture()
+  const state = await withTx(fixture())
   await context.run(state, async () => {
-    const checkout = await actions.saveClientBooking(input)
-    const saved = JSON.parse(state.storage.getItem('soundstage-client-bookings-v3:client%40test.com'))[0]
+    const today = shift(0)
+    const { id } = await book({ date: today })
+    assert.notEqual(id, 'forged')
+    const saved = (await ownView()).find(b => b.id === id)
     assert.equal(saved.paid, false)
-    await actions.verifyPayment(checkout.id)
     assert.equal(saved.total, 1000)
     assert.equal(saved.downpayment, 300)
     assert.equal(saved.client, 'Test Client')
     assert.equal(saved.provider, 'Events')
-    assert.equal(saved.status, 'Pending')
-    assert.notEqual(saved.id, 'forged')
-    assert.match(saved.paymentMethod, /^PayMongo:/)
+    assert.equal(saved.status, 'pending')
     assert.equal(saved.time, '6:00 PM')
     assert.equal(saved.eventType, 'Wedding')
-    assert.deepEqual(actions.getBookingAvailability(service.id), [])
-    assert.throws(() => actions.updateClientBookingStatus(saved.id, 'Confirmed'), /permission/)
+    assert.deepEqual(await actions.getBookingAvailability(service.id), [])
+    await assert.rejects(actions.updateClientBookingStatus(id, 'Confirmed'), /Cannot accept/)
     state.session.setItem('soundstage-session', JSON.stringify(other))
-    assert.throws(() => actions.updateClientBookingStatus(saved.id, 'Completed'), /not found/)
-    assert.throws(() => actions.sendBookingMessage({ bookingId: saved.id, body: 'Spoof' }), /not found/)
+    await assert.rejects(actions.updateClientBookingStatus(id, 'Completed'), /not found/)
+    await assert.rejects(actions.sendBookingMessage({ bookingId: id, body: 'Spoof' }), /not found/)
     state.session.setItem('soundstage-session', JSON.stringify(provider))
-    actions.updateClientBookingStatus(saved.id, 'Confirmed')
-    assert.deepEqual(actions.getBookingAvailability(service.id), ['2027-01-01'])
-    actions.updateClientBookingStatus(saved.id, 'Completed')
-    assert.throws(() => actions.createWithdrawalRequest({ amount: 1, payoutMethod: 'GCash', payoutAccount: '12345' }), /verified balance/)
+    assert.equal((await actions.updateClientBookingStatus(id, 'Confirmed')).status, 'awaiting_payment')
+    assert.deepEqual(await actions.getBookingAvailability(service.id), [today])
+    await paid(id, 300)
+    assert.equal((await core().confirmFromPayment(id)).confirmed, true)
+    await actions.updateClientBookingStatus(id, 'Completed')
+    // Test-mode money is never withdrawable.
+    await assert.rejects(actions.createWithdrawalRequest({ amount: 1, payoutMethod: 'GCash', payoutAccount: '12345' }), /verified balance/)
     state.session.setItem('soundstage-session', JSON.stringify(client))
-    actions.submitEventFeedback(saved.id, 5, 'Great work')
-    assert.throws(() => actions.submitEventFeedback(saved.id, 4, 'Again'), /already/)
+    await actions.submitEventFeedback(id, 5, 'Great work')
+    await assert.rejects(actions.submitEventFeedback(id, 4, 'Again'), /already/)
   })
 })
 test('public/private snapshots exclude documents, customer bookings and billing', async () => {
-  process.env.ENABLE_DEMO_PAYMENTS = 'true'
-  const state = fixture()
+  const state = await withTx(fixture())
   await context.run(state, async () => {
-    await actions.saveClientBooking(input)
+    await book({ date: shift(40) })
     state.session.clear()
-    const anonymous = visibleRecords()
+    const anonymous = await visibleRecords()
     assert.ok(anonymous[serviceKey])
     assert.equal(Object.keys(anonymous).some(k => k.startsWith('soundstage-client-bookings')), false)
     assert.equal(JSON.stringify(anonymous).includes('JVBERi0='), false)
@@ -70,15 +89,15 @@ test('public/private snapshots exclude documents, customer bookings and billing'
   })
 })
 test('profile edits cannot elevate roles; date blocks are enforced by the server', async () => {
-  const state = fixture()
+  const state = await withTx(fixture())
   await context.run(state, async () => {
     await actions.updateClientAccount({ role: 'admin', application: { status: 'Approved' }, firstName: 'Updated' })
-    assert.equal(JSON.parse(visibleRecords()['soundstage-accounts-v2']).find(a => a.email === client.email).role, 'client')
+    assert.equal(JSON.parse((await visibleRecords())['soundstage-accounts-v2']).find(a => a.email === client.email).role, 'client')
     await assert.rejects(actions.updateClientAccount({ email: 'stolen@test.com' }), /verification/)
     state.session.setItem('soundstage-session', JSON.stringify(provider))
-    actions.toggleScheduleDate('2027-01-01')
+    await actions.toggleScheduleDate(shift(60))
     state.session.setItem('soundstage-session', JSON.stringify(client))
-    await assert.rejects(actions.saveClientBooking(input), /blocked/)
+    await assert.rejects(book({ date: shift(60) }), /blocked/)
   })
 })
 test('import strips passwords, refuses overwrite, and requires administrator', () => {
@@ -102,53 +121,44 @@ test('request state is isolated across concurrent users', async () => {
     assert.equal(auth.getAccount().email, actor.email)
   })))
 })
-test('subscription verification is idempotent and owner restricted', async () => {
-  const state = fixture(provider)
+test('the return flow only reads payment status and never settles (payments AC17, AC18)', async () => {
+  const state = await withTx(fixture(provider))
   await context.run(state, async () => {
+    assert.equal(actions.verifyPayment, undefined)
     const checkout = await actions.createSubscriptionCheckout('Pro', 'GCash')
+    assert.deepEqual(await actions.createSubscriptionCheckout('Pro', 'GCash'), checkout)
     state.session.setItem('soundstage-session', JSON.stringify(other))
-    await assert.rejects(actions.verifyPayment(checkout.id), /not found/)
+    await assert.rejects(actions.getPaymentStatus(checkout.id), /not found/)
+    await assert.rejects(actions.cancelPayment(checkout.id), /not found/)
     state.session.setItem('soundstage-session', JSON.stringify(provider))
-    await actions.verifyPayment(checkout.id)
-    const first = state.storage.getItem('soundstage-marketplace-v1')
-    await actions.verifyPayment(checkout.id)
-    assert.equal(state.storage.getItem('soundstage-marketplace-v1'), first)
-    assert.equal(JSON.parse(first).payments.length, 1)
+    const before = state.storage.getItem('soundstage-marketplace-v1')
+    assert.deepEqual(await actions.getPaymentStatus(checkout.id), { status: 'pending', kind: 'subscription', checkoutUrl: checkout.checkoutUrl })
+    assert.deepEqual(await actions.cancelPayment(checkout.id), { status: 'expired', kind: 'subscription' })
+    assert.deepEqual(await actions.getPaymentStatus(checkout.id), { status: 'expired', kind: 'subscription' })
+    assert.equal(state.storage.getItem('soundstage-marketplace-v1'), before)
+    assert.notEqual((await actions.createSubscriptionCheckout('Pro', 'GCash')).id, checkout.id)
   })
 })
 
-test('unpaid and incorrect amounts cannot settle; cancellation releases the booking', async () => {
-  const state = fixture()
+test('availability blocks all provider packages and multi-day dates without exposing customer data', async () => {
+  const state = await withTx(fixture(other))
   await context.run(state, async () => {
-    const checkout = await actions.saveClientBooking(input)
-    const session = paymongoFixture.sessions.get('cs_' + checkout.id)
-    session.attributes.payments[0].attributes.amount = 1
-    assert.equal((await actions.verifyPayment(checkout.id)).paid, false)
-    session.attributes.payments = []
-    assert.equal((await actions.verifyPayment(checkout.id)).paid, false)
-    const cancelled = await actions.cancelPayment(checkout.id)
-    assert.equal(cancelled.cancelled, true)
-    const booking = JSON.parse(state.storage.getItem('soundstage-client-bookings-v3:client%40test.com'))[0]
-    assert.equal(booking.paid, false)
-    assert.equal(booking.status, 'Cancelled')
-    const next = await actions.saveClientBooking(input)
-    assert.notEqual(next.id, checkout.id)
-  })
-})
-
-test('availability blocks all provider packages and multi-day dates without exposing customer data', () => {
-  const state = fixture(other)
-  context.run(state, () => {
     state.storage.setItem(serviceKey, JSON.stringify([service, { ...service, id: 'service-2' }]))
-    state.storage.setItem('soundstage-client-bookings-v3:client%40test.com', JSON.stringify([
-      { ...input, id: 'private-booking', packageId: 'service-2', durationDays: 3, status: 'Confirmed', client: 'Private Customer' },
-      { ...input, date: '2027-02-01', status: 'Cancelled' },
-      { ...input, date: '2027-04-01', status: 'Pending', paid: true },
-      { ...input, date: '2027-05-01', status: 'Pending', paid: false },
-      { ...input, packageId: 'unrelated', date: '2027-03-01', status: 'Pending' },
-    ]))
-    state.storage.setItem('soundstage-schedule:provider%40test.com', JSON.stringify(['2027-01-10']))
-    assert.deepEqual(actions.getBookingAvailability(service.id), ['2027-01-01', '2027-01-02', '2027-01-03', '2027-01-10'])
-    assert.throws(() => actions.getBookingAvailability('missing'), /no longer available/)
+    const seed = (start, days, status, packageId = 'service-2', hold = null) => database.query(`INSERT INTO soundstage.bookings (client_email, provider_email, package_id, package_name, package_price, start_date, end_date, status, hold_expires_at)
+      VALUES ('client@test.com', 'provider@test.com', $1, 'Private Customer package', 1000, $2::date, $2::date + $3::int, $4, $5)`, [packageId, start, days, status, hold])
+    await seed(shift(100), 3, 'confirmed')
+    await seed(shift(110), 1, 'cancelled', 'service-1')
+    await seed(shift(120), 1, 'pending', 'service-1')
+    await seed(shift(130), 1, 'awaiting_payment', 'service-1', new Date(Date.now() + 3600000).toISOString())
+    await seed(shift(140), 1, 'awaiting_payment', 'service-1', new Date(Date.now() - 3600000).toISOString())
+    state.session.setItem('soundstage-session', JSON.stringify(provider))
+    await actions.toggleScheduleDate(shift(150))
+    state.session.setItem('soundstage-session', JSON.stringify(other))
+    const dates = await actions.getBookingAvailability(service.id)
+    for (const day of [shift(100), shift(101), shift(102), shift(130), shift(150)]) assert.ok(dates.includes(day), day)
+    for (const day of [shift(103), shift(110), shift(120), shift(140)]) assert.equal(dates.includes(day), false, day)
+    // Only dates leave the server; no booking details.
+    assert.equal(JSON.stringify(dates).includes('Private Customer'), false)
+    await assert.rejects(actions.getBookingAvailability('missing'), /no longer available/)
   })
 })

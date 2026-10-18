@@ -79,36 +79,53 @@ test('full server workflows persist in PostgreSQL and roll back conflicting writ
     const publicState = await execute(null)
     assert.ok(publicState.records['soundstage-provider-services-v2:provider%40test.com'])
     assert.equal(JSON.stringify(publicState).includes('JVBERi0='), false)
-    process.env.ENABLE_DEMO_PAYMENTS = 'true'
-    const bookingInput = { packageId: 'service-1', date: '2027-01-02', time: '12:00', eventTown: 'Balayan', location: 'Venue', guests: 10, paymentMethod: 'GCash', total: 1 }
-    const concurrent = await Promise.allSettled([execute(client, 'saveClientBooking', [bookingInput]), execute(outsider, 'saveClientBooking', [bookingInput])])
-    assert.equal(concurrent.filter(r => r.status === 'fulfilled').length, 2)
-    assert.equal(concurrent.filter(r => r.status === 'rejected').length, 0)
-    const winner = concurrent.find(r => r.status === 'fulfilled').value.result
-    assert.ok(winner.checkoutUrl.startsWith('https://checkout.paymongo.com/'))
-    await execute(client, 'verifyPayment', [winner.id])
+    // Booking plan 4 (T4.1): request → accept → webhook pays → confirmed → complete → feedback, all through execute().
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+    const bookingInput = { packageId: 'service-1', date: today, time: '12:00', eventTown: 'Balayan', location: 'Venue', guests: 10, total: 1, downpayment: 1, status: 'confirmed', paid: true }
+    const created = await Promise.allSettled([execute(client, 'saveClientBooking', [{ ...bookingInput, idempotencyKey: 'pg-1' }]), execute(outsider, 'saveClientBooking', [{ ...bookingInput, idempotencyKey: 'pg-2' }])])
+    assert.deepEqual(created.map(r => r.status), ['fulfilled', 'fulfilled'])
+    const winner = created[0].value.result, otherBooking = created[1].value.result
+    assert.deepEqual(Object.keys(winner), ['id'])
+    assert.equal((await execute(client, 'saveClientBooking', [{ ...bookingInput, idempotencyKey: 'pg-1' }])).result.id, winner.id)
+    const [stored] = (await db.query('SELECT status, total::float AS total FROM soundstage.bookings WHERE id = $1', [winner.id])).rows
+    assert.deepEqual(stored, { status: 'pending', total: 1000 })
     const saved = await execute(client)
     assert.equal(JSON.parse(saved.records['soundstage-client-bookings-v3:client%40test.com']).length, 1)
+    assert.equal(JSON.parse(saved.records['soundstage-client-bookings-v3:client%40test.com'])[0].status, 'pending')
     const unrelated = await execute(outsider)
     assert.equal(unrelated.records['soundstage-client-bookings-v3:client%40test.com'], undefined)
     await assert.rejects(execute(outsider, 'updateClientBookingStatus', [winner.id, 'Cancelled']), /not found/)
-    const otherBooking = concurrent[1].value.result
-    await execute(outsider, 'verifyPayment', [otherBooking.id])
     assert.deepEqual((await execute(client, 'getBookingAvailability', ['service-1'])).result, [])
     const accepted = await Promise.allSettled([
       execute(google, 'updateClientBookingStatus', [winner.id, 'Confirmed']),
-      execute(google, 'updateClientBookingStatus', [otherBooking.id, 'Confirmed']),
+      execute(google, 'acceptBooking', [otherBooking.id]),
     ])
     assert.equal(accepted[0].status, 'fulfilled')
     assert.equal(accepted[1].status, 'rejected')
-    assert.match(accepted[1].reason.message, /already accepted/)
-    assert.deepEqual((await execute(client, 'getBookingAvailability', ['service-1'])).result, ['2027-01-02'])
+    assert.match(accepted[1].reason.message, /already booked/)
+    assert.deepEqual((await execute(client, 'getBookingAvailability', ['service-1'])).result, [today])
+    const started = (await execute(client, 'startBookingPayment', [winner.id, 'downpayment', 'GCash'])).result
+    await assert.rejects(execute(client, 'startBookingPayment', [winner.id, 'downpayment', 'GCash', 1]), /Invalid input/)
+    const webhook = load('lib/server/payments/webhook.ts')
+    const event = { id: 'evt_pg_1', type: 'checkout_session.payment.paid', data: { id: 'cs_' + started.id, attributes: { reference_number: started.id, livemode: false, payments: [{ id: 'pay_pg_1', attributes: { status: 'paid', currency: 'PHP', amount: 30000, source: { type: 'gcash' } } }] } } }
+    await execute(null, undefined, [], undefined, () => webhook.processEvent(event))
+    const paidView = JSON.parse((await execute(client)).records['soundstage-client-bookings-v3:client%40test.com'])[0]
+    assert.equal(paidView.status, 'confirmed')
+    assert.equal(paidView.paid, true)
     await execute(google, 'updateClientBookingStatus', [winner.id, 'Completed'])
     await execute(client, 'submitEventFeedback', [winner.id, 5, 'Excellent'])
+    await assert.rejects(execute(client, 'submitEventFeedback', [winner.id, 4, 'Again']), /already/)
+    const history = (await db.query('SELECT new_status, actor_role FROM soundstage.booking_status_history WHERE booking_id = $1 ORDER BY id', [winner.id])).rows
+    assert.deepEqual(history.map(h => h.new_status), ['pending', 'accepted', 'awaiting_payment', 'confirmed', 'in_progress', 'completed'])
+    assert.equal(history[3].actor_role, 'system')
+    // Refund decisions are payroll master only (AC26).
+    await assert.rejects(execute(clerkAdmin, 'reviewBookingRefund', [winner.id, 'Paid', 'REF-1']), /permission/)
     const finalState = await execute(clerkAdmin)
     const finalBooking = JSON.parse(finalState.records['soundstage-client-bookings-v3:client%40test.com'])[0]
-    assert.equal(finalBooking.status, 'Completed')
+    assert.equal(finalBooking.status, 'completed')
     assert.equal(finalBooking.feedback.rating, 5)
+    // Booking JSON is the rollback copy and is never written after plan 4.
+    assert.equal((await db.query("SELECT count(*)::int AS n FROM soundstage.records WHERE key LIKE 'soundstage-client-bookings-v3:%'")).rows[0].n, 0)
     await assert.rejects(execute(null, 'saveProviderService', [{}]), /Sign in/)
     await assert.rejects(execute(clerkAdmin, 'constructor', []), /Unknown operation/)
     // Editable signup metadata must not grant administrator access.
@@ -118,7 +135,7 @@ test('full server workflows persist in PostgreSQL and roll back conflicting writ
     const promoted = { ...outsider, app_metadata: { role: 'admin' } }
     assert.equal(JSON.parse((await execute(promoted)).session['soundstage-session']).role, 'admin')
     await assert.rejects(execute(outsider), /revoked/)
-  } finally { delete process.env.ENABLE_DEMO_PAYMENTS; await db.close() }
+  } finally { await db.close() }
 })
 
 test('booking schema enforces statuses, no overlap, append-only history and immutable snapshots', async () => {

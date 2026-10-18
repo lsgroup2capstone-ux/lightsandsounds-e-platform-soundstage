@@ -196,31 +196,32 @@ test('provider logo replacement deletes the old logo', async () => {
   })
 })
 
-test('service saves verify image keys; replaced and dropped images are deleted and bookings follow', async () => {
+test('service saves verify image keys; replaced and dropped images are deleted; booked services cannot be dropped', async () => {
   const keyA = pngKey('service-image', provider.email, 1), keyB = pngKey('service-image', provider.email, 2), keyC = pngKey('service-image', provider.email, 3)
   const base = { name: 'Sound', location: 'Town', price: 100, active: true }
   const setup = storage => {
     accounts(storage, client, approved, other)
     storage.setItem('soundstage-provider-services-v2:provider%40test.com', JSON.stringify([{ ...base, id: 's1', image: keyA }, { ...base, id: 's2', image: keyB }]))
-    storage.setItem(bookingKey, JSON.stringify([{ id: 'b1', packageId: 's1', image: keyA, status: 'Pending' }]))
   }
+  // Booking rows live in soundstage.bookings now; s1 has one. Booking images are immutable snapshots (booking plan 4).
+  const booked = action => () => { context.getStore().tx = async () => [{ package_id: 's1' }]; return action() }
   await withHead(200, 'image/png', async () => {
     for (const bad of ['data:image/png;base64,AAAA', pngKey('service-image', other.email, 4), pngKey('profile-image', provider.email, 4)])
       await assert.rejects(run(provider, setup, () => actions.saveProviderService({ ...base, id: 's3', image: bad })), rejected())
     const added = await run(provider, setup, () => actions.saveProviderService({ ...base, id: 's3', image: keyC }))
     assert.ok(JSON.parse(added.state.storage.getItem('soundstage-provider-services-v2:provider%40test.com')).some(s => s.id === 's3' && s.image === keyC))
-    const updated = await run(provider, setup, () => actions.updateProviderServices([{ ...base, id: 's1', image: keyC }]))
+    const updated = await run(provider, setup, booked(() => actions.updateProviderServices([{ ...base, id: 's1', image: keyC }])))
     assert.deepEqual(updated.deletes.sort(), [keyA, keyB].sort())
-    assert.equal(JSON.parse(updated.state.storage.getItem(bookingKey))[0].image, keyC)
-    const unchanged = await run(provider, setup, () => actions.updateProviderServices([{ ...base, id: 's1', image: keyA }, { ...base, id: 's2', image: keyB }]))
+    await assert.rejects(run(provider, setup, booked(() => actions.updateProviderServices([{ ...base, id: 's2', image: keyB }]))), /Deactivate services/)
+    const unchanged = await run(provider, setup, booked(() => actions.updateProviderServices([{ ...base, id: 's1', image: keyA }, { ...base, id: 's2', image: keyB }])))
     assert.deepEqual(unchanged.deletes, [])
-    const renamed = await run(provider, setup, () => actions.updateProviderServices([{ ...base, id: 's1', image: keyA }, { ...base, id: 's2-new', image: keyB }]))
+    const renamed = await run(provider, setup, booked(() => actions.updateProviderServices([{ ...base, id: 's1', image: keyA }, { ...base, id: 's2-new', image: keyB }])))
     assert.deepEqual(renamed.deletes, [])
-    const shared = await run(provider, setup, () => actions.updateProviderServices([{ ...base, id: 's1', image: keyC }, { ...base, id: 's2', image: keyA }]))
+    const shared = await run(provider, setup, booked(() => actions.updateProviderServices([{ ...base, id: 's1', image: keyC }, { ...base, id: 's2', image: keyA }])))
     assert.deepEqual(shared.deletes, [keyB])
   })
   await withHead(404, '', async () => {
-    await assert.rejects(run(provider, setup, () => actions.updateProviderServices([{ ...base, id: 's1', image: keyC }])), rejected(400, /did not finish/))
+    await assert.rejects(run(provider, setup, booked(() => actions.updateProviderServices([{ ...base, id: 's1', image: keyC }]))), rejected(400, /did not finish/))
   })
 })
 

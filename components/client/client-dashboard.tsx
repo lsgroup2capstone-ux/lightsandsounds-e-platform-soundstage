@@ -13,7 +13,8 @@ import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { Textarea } from "@/components/ui/textarea"
 import { type Booking, formatPeso, statusStyles } from "@/lib/marketplace/mock-data"
-import { getClientBookings, updateClientBookingStatus, submitEventFeedback } from "@/lib/booking/client-bookings"
+import { getClientBookings, requestCancellation, startBookingPayment, submitEventFeedback } from "@/lib/booking/client-bookings"
+import { PaymentMethodPicker } from "@/components/payment/payment-method-picker"
 import { cn } from "@/lib/utils"
 import { Logo } from "@/components/site/logo"
 import { ThemeToggle } from "@/components/site/theme-toggle"
@@ -31,8 +32,22 @@ import { publicFileUrl, uploadFile } from "@/lib/data/file-upload"
 const tabs = ["Overview", "My bookings", "Messages", "Reports", "Payments", "Refunds", "Feedback", "My profile"] as const
 type Tab = (typeof tabs)[number] | "Feedback"
 
+const is = (booking: Booking, ...statuses: string[]) => statuses.includes(booking.status.toLowerCase())
+const CANCELLABLE = ["pending", "accepted", "awaiting_payment", "confirmed"]
+
+function PayButtons({ booking }: { booking: Booking }) {
+  const [method, setMethod] = useState("GCash QR")
+  const [busy, setBusy] = useState(false)
+  async function pay(type: "downpayment" | "full") {
+    setBusy(true)
+    try { location.assign((await startBookingPayment(booking.id, type, method)).checkoutUrl) }
+    catch (error) { window.dispatchEvent(new CustomEvent("soundstage-error", { detail: error instanceof Error ? error.message : "Could not start payment." })); setBusy(false) }
+  }
+  return <div className="mt-4 space-y-3 border-t border-border/60 pt-4"><p className="text-sm font-medium">The provider accepted. Pay within 48 hours to confirm your date.</p><PaymentMethodPicker value={method} onChange={setMethod} disabled={busy} /><div className="flex flex-wrap gap-2"><Button type="button" disabled={busy} onClick={() => void pay("downpayment")}>Pay 30% downpayment</Button><Button type="button" variant="outline" disabled={busy} onClick={() => void pay("full")}>Pay in full</Button></div></div>
+}
+
 function BookingRow({ booking, onCancel }: { booking: Booking; onCancel?: (id: string) => void }) {
-  const status = statusStyles[booking.status]
+  const status = statusStyles[booking.status] || { label: booking.status, className: "" }
   const listedService = getProviderServices().find((service) => service.id === booking.packageId)
   const coverageAreas = booking.coverageAreas || listedService?.coverageAreas || listedService?.location
   return (
@@ -46,16 +61,16 @@ function BookingRow({ booking, onCancel }: { booking: Booking; onCancel?: (id: s
           <p className="mt-1 text-sm text-muted-foreground">{booking.provider}</p>
           <div className="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground"><span className="inline-flex items-center gap-1"><CalendarDays width={13} />{booking.date}</span><span className="inline-flex items-center gap-1"><MapPin width={13} />{booking.location}</span></div>
         </div>
-        <div className="flex items-center justify-between gap-3 sm:flex-col sm:items-end"><div className="text-right"><p className="text-xs text-muted-foreground">Total</p><p className="font-display font-semibold">{formatPeso(booking.total)}</p></div>{onCancel && ["Pending", "Confirmed"].includes(booking.status) && <Button type="button" size="sm" variant="outline" className="text-destructive" onClick={() => onCancel(booking.id)}>Cancel booking</Button>}</div>
+        <div className="flex items-center justify-between gap-3 sm:flex-col sm:items-end"><div className="text-right"><p className="text-xs text-muted-foreground">Total</p><p className="font-display font-semibold">{formatPeso(booking.total)}</p></div>{onCancel && is(booking, ...CANCELLABLE) && <Button type="button" size="sm" variant="outline" className="text-destructive" onClick={() => onCancel(booking.id)}>Cancel booking</Button>}</div>
       </div>
-      {!booking.paid && booking.status !== "Cancelled" && booking.paymentMethod?.startsWith("PayMongo:") && <Button asChild variant="outline" className="mt-4"><Link href={`/payment/return?id=${booking.id}`}>Resume or cancel payment</Link></Button>}{booking.cancelledBy === "provider" && booking.paid && <p className="mt-4 text-sm text-primary">Provider cancelled this event. {booking.refund ? `Refund: ${booking.refund.status}.` : "Request your downpayment refund in the Refunds tab."}</p>}<details className="mt-4 border-t border-border/60 pt-4"><summary className="cursor-pointer text-sm font-medium text-primary">View booking details</summary><div className="mt-4 grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-3">{[["Booking reference", booking.id], ["Event date", booking.date], ["Event duration", `${booking.durationDays || 1} day${(booking.durationDays || 1) === 1 ? "" : "s"}`], ["Event time", booking.time], ["Event type", booking.eventType || "Not specified"], ["Venue", booking.location], ["Number of guests", String(booking.guests)], ["Provider", booking.provider], ["Covered cities/towns", coverageAreas ? getCoveredCitiesAndTowns(coverageAreas).join(", ") : "Not recorded"], ["Package price", formatPeso(booking.total)], ["Downpayment", formatPeso(booking.downpayment)], ["Payment", booking.paid ? "Paid" : "Unpaid"], ["Notes", booking.notes || "No notes provided"]].map(([label, value]) => <div key={label} className={label === "Notes" ? "sm:col-span-2 lg:col-span-3" : ""}><p className="text-xs uppercase tracking-wide text-muted-foreground">{label}</p><p className="mt-1 font-medium">{value}</p></div>)}</div>{coverageAreas && <div className="mt-5"><p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Service provider coverage areas</p><div className="flex flex-wrap gap-2">{getCoveredCitiesAndTowns(coverageAreas).map((area) => <span key={area} className="rounded-full bg-muted px-3 py-1 text-sm font-medium">{area}</span>)}</div></div>}</details>
+      {booking.status === "awaiting_payment" && <PayButtons booking={booking} />}{booking.cancelledBy === "provider" && booking.paid && <p className="mt-4 text-sm text-primary">Provider cancelled this event. {booking.refund ? `Refund: ${booking.refund.status}.` : "Request your downpayment refund in the Refunds tab."}</p>}<details className="mt-4 border-t border-border/60 pt-4"><summary className="cursor-pointer text-sm font-medium text-primary">View booking details</summary><div className="mt-4 grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-3">{[["Booking reference", booking.id], ["Event date", booking.date], ["Event duration", `${booking.durationDays || 1} day${(booking.durationDays || 1) === 1 ? "" : "s"}`], ["Event time", booking.time], ["Event type", booking.eventType || "Not specified"], ["Venue", booking.location], ["Number of guests", String(booking.guests)], ["Provider", booking.provider], ["Covered cities/towns", coverageAreas ? getCoveredCitiesAndTowns(coverageAreas).join(", ") : "Not recorded"], ["Package price", formatPeso(booking.total)], ["Downpayment", formatPeso(booking.downpayment)], ["Payment", booking.paid ? "Paid" : "Unpaid"], ["Notes", booking.notes || "No notes provided"]].map(([label, value]) => <div key={label} className={label === "Notes" ? "sm:col-span-2 lg:col-span-3" : ""}><p className="text-xs uppercase tracking-wide text-muted-foreground">{label}</p><p className="mt-1 font-medium">{value}</p></div>)}</div>{coverageAreas && <div className="mt-5"><p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Service provider coverage areas</p><div className="flex flex-wrap gap-2">{getCoveredCitiesAndTowns(coverageAreas).map((area) => <span key={area} className="rounded-full bg-muted px-3 py-1 text-sm font-medium">{area}</span>)}</div></div>}</details>
     </div>
   )
 }
 
 function Overview({ onTab }: { onTab: (tab: Tab) => void }) {
   const bookings = getClientBookings()
-  const active = bookings.filter((b) => b.status === "Confirmed" || b.status === "Pending")
+  const active = bookings.filter((b) => is(b, "confirmed", "pending", "accepted", "awaiting_payment", "in_progress"))
   const total = bookings.reduce((sum, b) => sum + b.total, 0)
   const paid = bookings.filter((b) => b.paid).reduce((sum, b) => sum + b.downpayment, 0)
   return (
@@ -78,8 +93,8 @@ function BookingsTab() {
   const [bookings, setBookings] = useState<Booking[]>(() => getClientBookings())
   const [filter, setFilter] = useState("All")
   useEffect(() => { const refresh = () => setBookings(getClientBookings()); window.addEventListener("soundstage-bookings-updated", refresh); window.addEventListener("storage", refresh); return () => { window.removeEventListener("soundstage-bookings-updated", refresh); window.removeEventListener("storage", refresh) } }, [])
-  async function cancelBooking(id: string) { try { if (!window.confirm("Cancel this booking? The provider will be notified.")) return; await updateClientBookingStatus(id, "Cancelled"); setBookings(getClientBookings()) } catch (error) { window.dispatchEvent(new CustomEvent("soundstage-error", { detail: error instanceof Error ? error.message : "Could not save changes." })) } }
-  const filtered = filter === "All" ? bookings : bookings.filter((booking) => booking.status === filter)
+  async function cancelBooking(id: string) { try { if (!window.confirm("Cancel this booking? Unpaid bookings cancel at once; paid bookings send a request to the provider.")) return; await requestCancellation(id); setBookings(getClientBookings()) } catch (error) { window.dispatchEvent(new CustomEvent("soundstage-error", { detail: error instanceof Error ? error.message : "Could not save changes." })) } }
+  const filtered = filter === "All" ? bookings : bookings.filter((booking) => is(booking, filter.toLowerCase()))
   return <div className="flex flex-col gap-5"><div className="flex flex-wrap gap-2">{["All", "Confirmed", "Pending", "Completed", "Cancelled"].map((item) => <Button key={item} size="sm" variant={filter === item ? "default" : "outline"} onClick={() => setFilter(item)}>{item}</Button>)}</div>{filtered.length > 0 ? filtered.map((booking) => <BookingRow key={booking.id} booking={booking} onCancel={cancelBooking} />) : <Card className="border-border/70 bg-card/60"><CardContent className="py-12 text-center"><p className="font-medium text-foreground">No bookings found</p><p className="mt-1 text-sm text-muted-foreground">Bookings matching this status will appear here.</p>{filter === "All" && <Button className="mt-4" asChild><Link href="/browse"><Search width={15} height={15} /> Browse services</Link></Button>}</CardContent></Card>}</div>
 }
 
@@ -93,7 +108,7 @@ function FeedbackTab() {
   const [bookings, setBookings] = useState<Booking[]>([])
   const [message, setMessage] = useState("")
   useEffect(() => {
-    const refresh = () => setBookings(getClientBookings().filter(b => b.status === "Completed"))
+    const refresh = () => setBookings(getClientBookings().filter(b => is(b, "completed")))
     refresh()
     window.addEventListener("soundstage-bookings-updated", refresh)
     window.addEventListener("storage", refresh)

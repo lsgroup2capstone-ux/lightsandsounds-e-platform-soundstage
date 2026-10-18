@@ -17,7 +17,7 @@ export function buildServiceRatings(bookings: Booking[]): ServiceRatings {
   const ratings: ServiceRatings = {}
   for (const b of bookings) {
     const f = b.feedback
-    if (b.status !== "Completed" || !f || !Number.isInteger(f.rating) || f.rating < 1 || f.rating > 5) continue
+    if ((b.status !== "Completed" && b.status !== "completed") || !f || !Number.isInteger(f.rating) || f.rating < 1 || f.rating > 5) continue
     ;(ratings[b.packageId] ??= []).push({ rating: f.rating, comment: String(f.comment ?? ""), createdAt: String(f.createdAt ?? ""), reviewer: reviewerName(b.client) })
   }
   for (const list of Object.values(ratings)) list.sort((a, b) => b.createdAt.localeCompare(a.createdAt))

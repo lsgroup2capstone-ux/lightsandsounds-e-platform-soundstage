@@ -7,9 +7,11 @@ const SERVICE_PREFIX = "soundstage-provider-services-v2:"
 const ACCOUNTS_KEY = "soundstage-accounts-v2"
 const HOLD_HOURS = 48
 const DOWNPAYMENT = 0.3
+// The one downpayment amount: what checkout charges is exactly what confirms (whole pesos).
+export const downpaymentFor = (total: number) => Math.round(DOWNPAYMENT * total)
 const DAY = 86400000
 
-type Row = { id: string; client_email: string; provider_email: string; status: string; start_date: string; end_date: string; package_price: string }
+type Row = { id: string; client_email: string; provider_email: string; status: string; start_date: string; end_date: string; package_price: string; price: string }
 export type BookableReason = "past" | "blocked" | "unavailable_day" | "overlap"
 export type BookingInput = { packageId: unknown; date: unknown; durationDays?: unknown; time?: unknown; eventType?: unknown; location?: unknown; eventTown?: unknown; guests?: unknown; notes?: unknown }
 
@@ -121,7 +123,7 @@ async function history(bookingId: string, from: string | null, to: string, actor
 // Missing and not-owned look identical so nothing about the booking leaks (AC13).
 export async function lockOwned(id: unknown, actor: Actor): Promise<Row> {
   if (typeof id !== "string" || !/^[0-9a-f-]{36}$/i.test(id)) throw new RequestError("Booking not found.", 404)
-  const [row] = await currentTx()<Row[]>`select id, client_email, provider_email, status, start_date, end_date, package_price from soundstage.bookings where id = ${id} for update`
+  const [row] = await currentTx()<Row[]>`select id, client_email, provider_email, status, start_date, end_date, package_price, coalesce(total, package_price) as price from soundstage.bookings where id = ${id} for update`
   const email = actor.email.toLowerCase()
   const owns = row && (actor.role === "system" || (actor.role === "client" && row.client_email === email) || (actor.role === "provider" && row.provider_email === email))
   if (!owns) throw new RequestError("Booking not found.", 404)
@@ -134,7 +136,7 @@ async function apply(row: Row, to: string, actor: Actor, reason: string | null, 
   try {
     updated = startHold
       ? await tx`update soundstage.bookings set status = ${to}, hold_expires_at = now() + make_interval(hours => ${HOLD_HOURS}), updated_at = now() where id = ${row.id} and status = ${row.status} returning id`
-      : await tx`update soundstage.bookings set status = ${to}, cancelled_by = ${to === "cancelled" ? actor.role : null}, updated_at = now() where id = ${row.id} and status = ${row.status} returning id`
+      : await tx`update soundstage.bookings set status = ${to}, cancelled_by = coalesce(${to === "cancelled" && row.status !== "refund_pending" ? actor.role : null}::text, cancelled_by), updated_at = now() where id = ${row.id} and status = ${row.status} returning id`
   } catch (error) {
     if ((error as { code?: string }).code === "23P01") throw new RequestError("These dates are already booked", 409)
     throw error
@@ -155,7 +157,16 @@ export async function transition(id: unknown, to: string, actor: Actor, reason?:
     if (check === "started" && row.start_date > manilaToday()) throw new RequestError("This can only happen on or after the event start date.")
     if (check === "unpaid" && (await paidTotalFn(row.id)) > 0) throw new RequestError("This booking is paid. Submit a cancellation request instead.")
     // Confirmation needs the verified downpayment no matter who calls (D6, AC16).
-    if (check === "downpayment" && (await paidTotalFn(row.id)) < DOWNPAYMENT * Number(row.package_price)) throw new RequestError("The downpayment has not been verified.", 409)
+    if (check === "downpayment" && (await paidTotalFn(row.id)) < downpaymentFor(Number(row.price))) throw new RequestError("The downpayment has not been verified.", 409)
+    // Refunds need verified money and a provider-side cancellation, and only one request (spec table).
+    if (check === "refundable") {
+      const [info] = await currentTx()<{ cancelled_by: string | null; approved: boolean; requested: boolean }[]>`select b.cancelled_by,
+        exists (select 1 from soundstage.cancellation_requests c where c.booking_id = b.id and c.status = 'approved') as approved,
+        exists (select 1 from soundstage.booking_status_history h where h.booking_id = b.id and h.new_status = 'refund_pending') as requested
+        from soundstage.bookings b where b.id = ${row.id}`
+      if ((await paidTotalFn(row.id)) <= 0 || !(info.cancelled_by === "provider" || info.approved)) throw new RequestError("Only paid events cancelled by the provider qualify for a refund.")
+      if (info.requested) throw new RequestError("A refund request already exists for this event.")
+    }
     if (check === "available") {
       await expireHolds()
       await assertBookable(row.provider_email, row.start_date, row.end_date, row.id)
@@ -165,7 +176,7 @@ export async function transition(id: unknown, to: string, actor: Actor, reason?:
   if (to === "accepted") {
     next = await apply(next, "awaiting_payment", SYSTEM, null, true)
     // Legacy money already received may cover the downpayment (design U2).
-    if ((await paidTotalFn(row.id)) >= DOWNPAYMENT * Number(row.package_price) && (await confirmFromPayment(row.id)).confirmed) next = { ...next, status: "confirmed" }
+    if ((await paidTotalFn(row.id)) >= downpaymentFor(Number(row.price)) && (await confirmFromPayment(row.id)).confirmed) next = { ...next, status: "confirmed" }
   }
   return { id: next.id, status: next.status }
 }
@@ -185,7 +196,7 @@ export async function confirmFromPayment(bookingId: string): Promise<{ confirmed
     const [last] = await currentTx()<{ reason: string | null }[]>`select reason from soundstage.booking_status_history where booking_id = ${row.id} order by id desc limit 1`
     return { confirmed: false, reason: row.status === "cancelled" && last?.reason === "payment expired" ? "hold_expired" : "not_awaiting_payment" }
   }
-  if ((await paidTotalFn(row.id)) < DOWNPAYMENT * Number(row.package_price)) return { confirmed: false, reason: "insufficient" }
+  if ((await paidTotalFn(row.id)) < downpaymentFor(Number(row.price))) return { confirmed: false, reason: "insufficient" }
   const overlap = await currentTx()<{ id: string }[]>`select id from soundstage.bookings where provider_email = ${row.provider_email} and id <> ${row.id}
     and status in ('confirmed', 'in_progress') and daterange(start_date, end_date) && daterange(${row.start_date}::date, ${row.end_date}::date) limit 1`
   if (overlap.length) return { confirmed: false, reason: "dates_taken" }

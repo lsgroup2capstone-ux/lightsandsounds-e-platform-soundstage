@@ -2,7 +2,7 @@
 artifact: spec
 schema: 1
 feature: 20261009-paymongo-payments
-revision: 3
+revision: 4
 status: spec-approved
 risk: high-risk
 ---
@@ -43,7 +43,7 @@ Facts found in the code:
 | D4 | Webhook URL | `/api/webhooks/paymongo` is primary. `/api/paymongo/webhook` delegates to the same handler until the PayMongo dashboard is switched; removal is a follow-up. | Avoids dropping live notifications. |
 | D5 | Return page | Shows status read from `payments` only ("Payment processing…" until the webhook arrives); never marks paid. Local development needs PayMongo test webhooks reaching the machine. | User rule: paid only after webhook verification. |
 | D6 | Subscriptions | Use the same tables and webhook-only rule; subscription activation logic stays as is. | One payment flow. |
-| D7 | Payment types | `downpayment` (30% of booking snapshot price), `full` (snapshot price), `balance` (remaining). Amount always computed server-side. | Requirement; client cannot set amounts. |
+| D7 | Payment types | `downpayment` (30% of the booking snapshot price), `full` (snapshot price minus verified payments), `balance` (remaining). The snapshot price is the booking's stored `total` (multi-day price plus transportation fee; `package_price` only when `total` is null). Amount always computed server-side. | Requirement; client cannot set amounts. Rev 4: user chose `total` (2026-10-17). |
 | D8 | Amount verification | Webhook payment must match the record exactly: amount in centavos, currency PHP, livemode, and reference. Mismatch → event stored, payment `review`, booking unchanged. | Prevents under-payment or cross-mode confirmation. |
 | D9 | Duplicates and failures | Event id inserted in the same transaction as processing; failure rolls back and returns 5xx so PayMongo retries; duplicate id returns 200 without processing. | Exactly-once effect with safe retries. |
 | D10 | Booking confirmation | In the same transaction, when verified paid total ≥ 30% of snapshot price, apply the booking module's `awaiting_payment → confirmed` transition. Late payment (hold expired or dates taken) → payment `review`, booking not confirmed. | Booking-schedule D6 and AC17. |
@@ -114,3 +114,4 @@ Migration
 - 2026-10-09: revision 1 approved by the user.
 - 2026-10-09: revision 2; changed Out of scope wording only; affected plans none; reason: payroll master owns refund decisions (ADR 0004).
 - 2026-10-09: revision 3; changed D3; affected plans none (not yet planned); reason: user approved the refund module (20261009-refund-module).
+- 2026-10-17: revision 4; changed D7 (snapshot price = booking `total`); affected plans payments plan 2, booking-schedule plans 4 and 5; reason: user decision in payments review-2 B1.

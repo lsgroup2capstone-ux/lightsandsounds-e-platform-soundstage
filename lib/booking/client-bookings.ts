@@ -31,9 +31,14 @@ export function getClientBookings(): Booking[] {
   return key ? readBookings(key) : getAllBookings()
 }
 
-export function saveClientBooking(booking: Booking) { return mutate<{ id: string; checkoutUrl: string }>("saveClientBooking", [booking]) }
+export function saveClientBooking(booking: Booking & { idempotencyKey: string }) { return mutate<{ id: string }>("saveClientBooking", [booking]) }
 
 export function updateClientBookingStatus(id: string, status: Booking["status"]) { return mutate<Booking | null>("updateClientBookingStatus", [id, status]) }
+
+export function requestCancellation(id: string, reason?: string) { return mutate<{ id: string; status: string }>("requestCancellation", [id, reason]) }
+
+// The server computes the amount; the browser only names the payment type (payments AC4).
+export function startBookingPayment(id: string, type: "downpayment" | "full" | "balance", method: string) { return mutate<{ id: string; checkoutUrl: string }>("startBookingPayment", [id, type, method]) }
 
 export function submitEventFeedback(id: string, rating: number, comment: string) { return mutate<void>("submitEventFeedback", [id, rating, comment]) }
 

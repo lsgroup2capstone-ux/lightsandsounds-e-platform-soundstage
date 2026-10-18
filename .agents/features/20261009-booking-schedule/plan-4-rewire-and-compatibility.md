@@ -12,7 +12,7 @@ risk: high-risk
 - Feature: `.agents/features/20261009-booking-schedule/spec.md`
 - Design: `.agents/features/20261009-booking-schedule/design.md`
 - Implements decisions: D1 (compatibility), D8 (refund functions restricted)
-- Spec revision: 4
+- Spec revision: 5
 - Depends on: plans 2 and 3; paymongo-payments plans 1 and 2 (`startBookingPayment` must exist before booking creation stops starting a checkout)
 - Status: plan-approved
 - Estimate: about 380 lines of diff; split point: Phase 1 (server) and Phase 2 (UI) as two parts
@@ -52,7 +52,7 @@ Every existing booking action and screen runs on the tables. Clients request, pr
 - `requestBookingRefund` → `transition(cancelled → refund_pending)` by the client owner, keeping the existing method and account validation; the refund details go in history `reason`.
 - `reviewBookingRefund`: `requireRole("payroll_master")`, then `refunded` or back to `cancelled` (AC26, D8).
 - `lib/server/domain/client-bookings.ts`: keep the exported names. Each delegates to the booking module. The JSON-reading code is removed.
-- `visibleRecords()`: build the `soundstage-client-bookings-v3:<email>` keys from `listVisible(actor)` in the `Booking` shape: `date` = start, `durationDays` = days, `paid` = `paidTotal ≥ 0.3 × price`, `downpayment` = `round(0.3 × total)`. Booking JSON keys in storage are no longer sent.
+- `visibleRecords()`: build the `soundstage-client-bookings-v3:<email>` keys from `listVisible(actor)` in the `Booking` shape: `date` = start, `durationDays` = days, `paid` = `paidTotal ≥ 0.3 × total` (snapshot price, payments D7 rev 4; core confirm checks use the same value), `downpayment` = `round(0.3 × total)`. Booking JSON keys in storage are no longer sent.
 - In `execute()`, bookings JSON keys are read-only after this plan: if an action tried to change one, throw. This protects the rollback copy.
 
 ### Phase 2: UI (minimal, existing components only)

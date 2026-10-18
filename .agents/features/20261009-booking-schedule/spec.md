@@ -2,7 +2,7 @@
 artifact: spec
 schema: 1
 feature: 20261009-booking-schedule
-revision: 4
+revision: 5
 status: spec-approved
 risk: high-risk
 ---
@@ -107,7 +107,7 @@ Transitions
 
 Payment
 
-- AC16: WHEN a verified PayMongo payment of at least 30% of the snapshot price is recorded for an `awaiting_payment` booking, THE SYSTEM SHALL move it to `confirmed`.
+- AC16: WHEN a verified PayMongo payment of at least 30% of the snapshot price (the booking's stored `total`, see payments D7) is recorded for an `awaiting_payment` booking, THE SYSTEM SHALL move it to `confirmed`.
 - AC17: IF the dates were taken by another confirmed booking before payment verification, THEN THE SYSTEM SHALL not confirm, mark the payment for refund review, and record the reason.
 - AC18: THE SYSTEM SHALL never move a booking to `confirmed` from a client request, redirect, or unverified callback.
 - AC19: WHEN a duplicate PayMongo confirmation arrives for an already-recorded payment, THE SYSTEM SHALL ignore it without a second status change.
@@ -150,3 +150,4 @@ Compatibility
 - 2026-10-09: revision 2; changed D8, transition table (refund rows), Out of scope, AC26; affected plans none (not yet planned); reason: user approved the payroll-master module (payroll master owns refund and payout decisions, ADR 0004).
 - 2026-10-09: revision 3; changed Out of scope, AC26; affected plans none (not yet planned); reason: user approved the admin module (20261009-admin-module).
 - 2026-10-09: revision 4; changed D8, transition table (refund rows); affected plans none (not yet planned); reason: user approved the refund module (20261009-refund-module).
+- 2026-10-17: revision 5; changed AC16 wording (snapshot price = booking `total`, payments D7 rev 4); affected plans 4 and 5; reason: user decision in payments review-2 B1.

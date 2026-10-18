@@ -12,7 +12,7 @@ risk: high-risk
 - Feature: `.agents/features/20261009-booking-schedule/spec.md`
 - Design: `.agents/features/20261009-booking-schedule/design.md` (mapping U2)
 - Implements decisions: D1 (migration)
-- Spec revision: 4
+- Spec revision: 5
 - Also covers: paymongo-payments spec revision 3, AC20
 - Depends on: plan 4, paymongo-payments plan 1
 - Status: plan-approved
@@ -41,7 +41,8 @@ risk: high-risk
   - map the status using design U2;
   - `legacy_id = booking.id`;
   - set `start_date`/`end_date` from `date` + `durationDays`;
-  - build the snapshot from the stored `packageName`/`basePrice`/`total` (the booking's own copy, not today's package).
+  - build the snapshot from the stored `packageName`/`basePrice`/`total` (the booking's own copy, not today's package); `total` is the payment basis (payments D7 rev 4).
+  - `Cancelled` + refund `Rejected` keeps its refund history (`cancelled → refund_pending → cancelled`) so the one-request rule holds (review-5 M1).
 - Unmappable (unknown status, missing provider/dates, or `Confirmed` unpaid) → add to `unmappable` with a reason and skip (AC5).
 - Insert with `ON CONFLICT (legacy_id) DO NOTHING` and add one history row (`old_status` null, actor `system`, reason "migrated from JSON"). An existing `legacy_id` counts as `skipped` (AC4).
 - An exclusion violation (`23P01`) on insert runs inside a `SAVEPOINT`. Roll back that one row, record `{legacy_id, conflictsWith}` in `conflicts`, and continue (AC6).

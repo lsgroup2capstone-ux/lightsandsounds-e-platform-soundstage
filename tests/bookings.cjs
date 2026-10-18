@@ -211,3 +211,70 @@ test('provider starts and completes only on or after the start date; paid bookin
     assert.deepEqual(await h.run(() => core.transition(legacy, 'accepted', provider)), { id: legacy, status: 'confirmed' })
   } finally { core.registerPaidTotal(async () => 0); await h.db.close() }
 })
+
+test('bookings are visible only to their client, provider, admin and payroll master (plan 4 T4.2)', async () => {
+  const h = await setup()
+  const compat = load('lib/server/bookings/compat.ts')
+  try {
+    const mine = (await create(h, day(5))).id
+    const theirs = (await create(h, day(6), {}, other)).id
+    const rivals = (await create(h, day(7), { packageId: 'svc-rival' })).id
+    const seen = async viewer => (await h.run(() => compat.listVisible(viewer))).map(v => v.booking.id).sort()
+    assert.deepEqual(await seen(client), [mine, rivals].sort())
+    assert.deepEqual(await seen(other), [theirs])
+    assert.deepEqual(await seen(provider), [mine, theirs].sort())
+    assert.deepEqual(await seen(rival), [rivals])
+    assert.deepEqual(await seen({ email: 'admin@test.com', role: 'admin' }), [mine, theirs, rivals].sort())
+    assert.deepEqual(await seen({ email: 'pm@test.com', role: 'payroll_master' }), [mine, theirs, rivals].sort())
+    assert.deepEqual(await seen(null), [])
+    const [view] = (await h.run(() => compat.listVisible(other))).map(v => v.booking)
+    assert.equal(view.status, 'pending')
+    assert.equal(view.paid, false)
+    assert.equal(view.downpayment, 3000)
+  } finally { await h.db.close() }
+})
+
+test('every booking status has a label and style (AC27, plan 4 T4.3)', () => {
+  const { statusStyles } = load('lib/marketplace/mock-data.ts')
+  for (const status of [...BOOKING_STATUSES, 'Pending', 'Confirmed', 'Cancelled', 'Completed']) {
+    assert.ok(statusStyles[status]?.label, status)
+    assert.ok(statusStyles[status]?.className, status)
+  }
+})
+
+test('refunds: paid provider-cancelled bookings only, once, decided by the payroll master (spec refund rows, AC26)', async () => {
+  const h = await setup()
+  const compat = load('lib/server/bookings/compat.ts')
+  const paid = new Set()
+  core.registerPaidTotal(async id => paid.has(id) ? 3000 : 0)
+  const pm = { id: 'pm', email: 'pm@test.com', role: 'payroll_master' }
+  try {
+    const id = (await create(h, day(9))).id
+    await h.run(() => core.transition(id, 'accepted', provider))
+    paid.add(id)
+    await h.db.query("INSERT INTO soundstage.payments (target_kind, target_id, owner_email, type, amount, status, method) VALUES ('booking', $1, 'client@test.com', 'downpayment', 3000, 'paid', 'PayMongo: gcash')", [id])
+    await h.run(() => core.confirmFromPayment(id))
+    await assert.rejects(h.run(() => compat.requestRefund(client, id, 'GCash', '09123456789')), /Cannot request a refund for a booking that is confirmed/)
+    await h.run(() => core.transition(id, 'cancelled', provider, 'Equipment failure'))
+    // The client list shows the booking because the server says it qualifies.
+    assert.equal((await h.run(() => compat.getOwned(client, id))).refundEligible, true)
+    await assert.rejects(h.run(() => compat.requestRefund(other, id, 'GCash', '09123456789')), /not found/)
+    await assert.rejects(h.run(() => compat.requestRefund(client, id, 'Cash', '09123456789')), /payout method/)
+    assert.equal((await h.run(() => compat.requestRefund(client, id, 'GCash', '09123456789'))).status, 'refund_pending')
+    assert.equal((await h.run(() => compat.getOwned(client, id))).refundEligible, undefined)
+    const pending = (await h.run(() => compat.getOwned(client, id))).refund
+    assert.deepEqual({ status: pending.status, amount: pending.amount, method: pending.method }, { status: 'Pending', amount: 3000, method: 'GCash' })
+    await assert.rejects(h.run(() => compat.reviewRefund({ ...pm, role: 'admin' }, id, 'Paid', 'REF-1')), /permission/)
+    await assert.rejects(h.run(() => compat.reviewRefund(pm, id, 'Paid', '')), /reference/)
+    assert.equal((await h.run(() => compat.reviewRefund(pm, id, 'Rejected', 'Not eligible'))).status, 'cancelled')
+    const rejected = await h.run(() => compat.getOwned(pm, id))
+    assert.deepEqual({ status: rejected.refund.status, reason: rejected.refund.reason, by: rejected.cancelledBy }, { status: 'Rejected', reason: 'Not eligible', by: 'provider' })
+    await assert.rejects(h.run(() => compat.requestRefund(client, id, 'GCash', '09123456789')), /already exists/)
+    await assert.rejects(h.run(() => compat.reviewRefund(pm, id, 'Paid', 'REF-1')), /no longer pending/)
+    // A client cancelling an unpaid booking never qualifies.
+    const unpaid = (await create(h, day(12))).id
+    await h.run(() => core.transition(unpaid, 'cancelled', client))
+    assert.equal((await h.run(() => compat.getOwned(client, unpaid))).refundEligible, undefined)
+    await assert.rejects(h.run(() => compat.requestRefund(client, unpaid, 'GCash', '09123456789')), /Only paid events/)
+  } finally { core.registerPaidTotal(async () => 0); await h.db.close() }
+})

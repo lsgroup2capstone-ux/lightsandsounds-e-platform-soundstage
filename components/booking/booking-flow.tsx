@@ -16,12 +16,10 @@ import {
 } from "@/components/ui/dialog"
 import { type Booking, type ServicePackage, formatPeso } from "@/lib/marketplace/mock-data"
 import { saveClientBooking } from "@/lib/booking/client-bookings"
-import { openPaymentWindow } from "@/lib/booking/payment-window"
 import { mutate } from "@/lib/data/app-store"
 import { BookingDatePicker } from "@/components/booking/booking-date-picker"
 import { cn } from "@/lib/utils"
 import { getAccount } from "@/lib/auth/client-auth"
-import { PaymentMethodPicker } from "@/components/payment/payment-method-picker"
 import { PaymentReceiptCard } from "@/components/payment/payment-receipt"
 
 import { isAreaCovered, getTownDistance, getTransportationTier, getTransportationFee } from "@/lib/booking/booking-pricing"
@@ -139,14 +137,12 @@ export function BookingFlow({ pkg, trigger }: { pkg: ServicePackage; trigger: Re
       paidAt: new Date().toISOString(),
       paymentMethod,
     }
-    let paymentTab: Window | undefined
     setSaving(true)
     try {
-      paymentTab = openPaymentWindow()
-      const saved = await saveClientBooking(booking)
-      setCheckoutUrl(saved.checkoutUrl)
-      if (!paymentTab.closed) paymentTab.location.replace(saved.checkoutUrl)
-    } catch (error) { paymentTab?.close(); setBookingError((error as Error).message); setStep(1) }
+      // One key per submit so a retried request never creates a second booking (booking AC10).
+      await saveClientBooking({ ...booking, idempotencyKey: crypto.randomUUID() })
+      setCheckoutUrl("requested")
+    } catch (error) { setBookingError((error as Error).message); setStep(1) }
     finally { setSaving(false) }
   }
 
@@ -326,22 +322,20 @@ export function BookingFlow({ pkg, trigger }: { pkg: ServicePackage; trigger: Re
         {step === 3 && (
           <div className="flex flex-col gap-4">
             <div className="rounded-lg bg-primary/10 p-4">
-              <p className="text-sm text-muted-foreground">Downpayment due now</p>
+              <p className="text-sm text-muted-foreground">Downpayment due after the provider accepts</p>
               <p className="text-4xl font-semibold tracking-tight text-foreground">{formatPeso(downpayment)}</p>
               <p className="mt-1 text-xs text-muted-foreground">
                 Your date is reserved after provider acceptance. Balance of {formatPeso(balance)} is paid on the event day.
               </p>
             </div>
-            <PaymentMethodPicker value={paymentMethod} onChange={setPaymentMethod} disabled={saving} />
-            <p className="text-xs text-muted-foreground">PayMongo opens in a new tab. Complete your payment there.</p>
-            {checkoutUrl && <p role="status" className="text-sm">Checkout is ready. <a href={checkoutUrl} target="_blank" rel="noopener noreferrer" className="text-primary underline">Open payment tab</a></p>}
+            <p role="status" aria-live="polite" className="text-sm">{checkoutUrl ? "Request sent. You can pay after the provider accepts." : ""}</p>
             <div className="flex gap-2">
               <Button variant="outline" className="flex-1" onClick={() => setStep(2)}>
                 Back
               </Button>
               <Button className="flex-1" disabled={saving || Boolean(checkoutUrl)} onClick={completePayment}>
                 <CreditCard width={16} height={16} />
-                Pay {formatPeso(downpayment)}
+                Send booking request
               </Button>
             </div>
           </div>

@@ -54,8 +54,8 @@ export function isProviderPathLocked(path: string, approved: boolean) { return !
 
 export function peso(value: number) { return "₱" + value.toLocaleString("en-PH") }
 export function hubStatus(status: string) {
-  if (["Approved", "Confirmed", "Released", "Paid", "Resolved", "Active"].includes(status)) return "bg-success/15 text-success border-success/30"
-  if (["Rejected", "Cancelled"].includes(status)) return "bg-destructive/15 text-destructive border-destructive/30"
+  if (["Approved", "Confirmed", "Released", "Paid", "Resolved", "Active", "confirmed", "in_progress", "completed", "refunded"].includes(status)) return "bg-success/15 text-success border-success/30"
+  if (["Rejected", "Cancelled", "cancelled", "declined"].includes(status)) return "bg-destructive/15 text-destructive border-destructive/30"
   return "bg-warning/15 text-warning border-warning/30"
 }
 

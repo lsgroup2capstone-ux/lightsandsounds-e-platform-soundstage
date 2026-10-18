@@ -11,7 +11,7 @@ export function RefundsPanel({ admin = false }: { admin?: boolean }) {
   const [bookings, setBookings] = useState<Booking[]>([])
   const [message, setMessage] = useState("")
   useEffect(() => {
-    const refresh = () => setBookings(getClientBookings().filter(b => admin ? Boolean(b.refund) : b.status === "Cancelled" && b.cancelledBy === "provider" && b.paid && b.downpayment > 0))
+    const refresh = () => setBookings(getClientBookings().filter(b => admin ? Boolean(b.refund) : Boolean(b.refund) || Boolean(b.refundEligible)))
     refresh()
     window.addEventListener("soundstage-bookings-updated", refresh); window.addEventListener("storage", refresh)
     return () => { window.removeEventListener("soundstage-bookings-updated", refresh); window.removeEventListener("storage", refresh) }
